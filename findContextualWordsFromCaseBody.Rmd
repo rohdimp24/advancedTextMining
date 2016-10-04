@@ -1,0 +1,190 @@
+---
+title: "clustering_usingLDA"
+output: html_document
+---
+this program calculates the P(W2|W1) contextual informations. 
+the thing that is missing is the stemming that is required to put an end to the repeated forms  like vibration, vibrations
+
+
+
+```{r}
+library(RMySQL)
+library(tm)
+library(SnowballC)
+library(Matrix)
+library(lda)
+library(LDAvis)
+library(servr)
+
+mydb = dbConnect(MySQL(), user='root', password='', dbname='domainanalysis', host='localhost')
+
+
+
+#this is the subset 
+#subcases<-dbGetQuery(mydb, "SELECT * FROM `crmcleanupnew` LIMIT 2000")
+subcases<-dbGetQuery(mydb, "SELECT * FROM `autonormalizedss_sentences`")
+stopwordsList<-dbGetQuery(mydb, "SELECT stopword FROM `stopwordss`")
+domainWords<-dbGetQuery(mydb, "SELECT * FROM `domainwordss`")
+
+```
+perform the basic cleanup on the data 
+
+```{r}
+#using the normalized text so that we have least amount of noise
+txt=subcases$normalized
+txt=tolower(txt)
+
+#remove the punctuation so that we have all unigrams
+txt <- gsub("[[:punct:]]", " ", txt)  # replace punctuation with space
+
+
+#A matrix to keep track of the docid, sentenceid and the sentence content
+finalTxtMat=matrix(nrow = NROW(txt),ncol = 3)
+finalTxtMat[,1]=subcases$originalDocId
+finalTxtMat[,2]=subcases$sno
+finalTxtMat[,3]=txt
+
+```
+now prepare the corpus
+
+```{r}
+
+txtCorpus=finalTxtMat[,3]
+doc.list <- strsplit(txtCorpus, "[[:space:]]+")
+
+corpus=Corpus(VectorSource(txtCorpus))
+stop_words=getStopWordsList()
+corpus=tm_map(corpus,removeWords,c(stop_words))
+
+corpus <- tm_map(corpus, PlainTextDocument)
+#creating the document term matrix
+dtm = DocumentTermMatrix(corpus,control=list(wordLengths=c(2,Inf)))
+dtm
+
+#creating the term document matrix which is the transpose o fthe dtm
+#tdm <- TermDocumentMatrix(corpus)
+#tdm
+
+
+#removing the sparse terms from the dtm
+sparseDtm=removeSparseTerms(dtm,0.999)
+sparseDtm
+
+
+
+```
+
+
+```{r}
+
+getStopWordsList=function()
+{
+  
+  #stop_words=tolower(stop_words)
+  
+  stop_words=stopwordsList$stopword
+  stop_words = c(stop_words, LETTERS,"BR","br")
+  stop_words=c(stop_words,stopwords("english"))
+  
+ stop_words=c(stop_words,"aren't","can't","couldn't","didn't","doesn't","don't","hadn't","hasn't","haven't","he'd","he'll","here's","he's","how's","i'd","i'll","i'm","isn't","it's","i've","let's","mustn't","shan't","she'd","she'll","she's","shouldn't","that's","there's","they'd","they'll","they're","they've","wasn't","we'd","we'll","we're","weren't","we've","what's","when's","where's","who's","why's","won't","wouldn't","you'd","you'll","you're","you've","data","advised","close","additional","resolution","generating","issue","unit","information","ai","predix","update","â","Â")
+  stop_words=tolower(stop_words)
+  return(stop_words)
+  
+}
+
+
+getFrequencyForTerm=function(term,mat)
+{
+  return(sum(mat[,term]))
+  
+}
+
+
+#p(w2|w1)=C(W2,W1)/C(W1)..this is in sync with the N-Gram analysis as suggested by dan juraf
+getContextualScore=function(word1,word2,bigrams,mat)
+{
+  #word1="vibration"
+  #word2="turbine"
+  bigram=paste(word1, word2)
+  print(bigram)
+  numerator=bigrams[bigram]
+  denominator=getFrequencyForTerm(word1,mat)
+  print(denominator)
+  score=numerator/denominator
+  #print(score)
+  return(score)
+  
+}
+
+
+```
+
+try out the context analysis. This ananlysis is taking into account only the bigrams
+
+```{r}
+
+unigrams=colnames(sparseDtm)
+unigrams
+
+tokens <-  tolower(unlist(doc.list))
+tokens2 <- tolower(c(tokens[-1], "."))
+bigrams <- sort(table(paste(tokens, tokens2)), decreasing=T)
+bOk=which(bigrams>4)
+bigrams<-bigrams[bOk]
+
+size=length(bigrams)
+#dd<- unlist(strsplit(b, "[[:space:]]+"))
+finalBigramWords <- vector()
+for (b in names(bigrams)[1:size])
+{
+    #b="difference pressure"
+    dd<- unlist(strsplit(b, "[[:space:]]+"))
+    #cat(dd,"\n")
+    #if(!(dd[1] %in% stop_words | dd[2] %in% stop_words))
+   if((dd[1] %in% unigrams & dd[2] %in% unigrams))
+    {
+     # print("dsdsd")
+      if(nchar(dd[1])>0 & nchar(dd[2])>0)
+      {
+        finalBigramWords<-c(finalBigramWords,b)  
+      }
+      #cat("found",b,"\n")
+      
+    }
+}
+
+head(finalBigramWords,100)
+
+
+##Once the bigrams have been generated we want to check what is the context
+
+mat=as.matrix(sparseDtm)
+outputmat=matrix(nrow = 10000,ncol = 3)
+#get the contextual info
+size=length(finalBigramWords)
+count=1
+for (i in 1:size)
+{
+  b=finalBigramWords[i]
+  tt=strsplit(b, "[[:space:]]+")
+  word1=tt[[1]][1]
+  word2=tt[[1]][2]
+  print(word1)
+  print(word2)
+  outputmat[count,1]=word1
+  outputmat[count,2]=word2
+  outputmat[count,3]=getContextualScore(word1,word2,bigrams,mat)
+  count=count+1
+}
+
+head(outputmat,30)
+
+#save the output to a csvr file
+write.csv(outputmat,"contextScoreBigrams.csv")
+
+
+
+
+
+
+```
