@@ -179,8 +179,13 @@ for (i in 1:size)
 
 head(outputmat,30)
 
+outputmat=na.omit(outputmat)
+ord <- order(outputmat[,3],decreasing = TRUE)
+
+newOutputMat=outputmat[ord,]
+
 #save the output to a csvr file
-write.csv(outputmat,"contextScoreBigrams.csv")
+write.csv(newOutputMat,"contextScoreBigrams.csv")
 
 
 
