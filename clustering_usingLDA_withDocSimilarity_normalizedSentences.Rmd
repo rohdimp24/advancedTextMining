@@ -1,0 +1,780 @@
+---
+title: "clustering_usingLDA"
+output: html_document
+---
+
+In this program I have used the normalized sentecnes to calculate the similarity based on the LDA and the cosine
+One thing to note is that the topics are quite seperated. only 2 topics have some overlap
+I could see some of the cases that are similar even if there are few extra words
+
+
+```{r}
+mydb = dbConnect(MySQL(), user='root', password='', dbname='domainanalysis', host='localhost')
+library(tm)
+library(SnowballC)
+library(Matrix)
+library(lda)
+library(LDAvis)
+library(servr)
+
+
+#this is the subset 
+#subcases<-dbGetQuery(mydb, "SELECT * FROM `crmcleanupnew` LIMIT 2000")
+subcases<-dbGetQuery(mydb, "SELECT * FROM `autonormalizedss_sentences`")
+stopwordsList<-dbGetQuery(mydb, "SELECT stopword FROM `stopwordss`")
+domainWords<-dbGetQuery(mydb, "SELECT * FROM `domainwordss`")
+
+```
+perform the basic cleanup on the data 
+
+```{r}
+txt=subcases$normalized
+txt=tolower(txt)
+#finalTxtMat=getSentencesFromText(txt,domainWords)
+finalTxtMat=matrix(nrow = NROW(txt),ncol = 3)
+finalTxtMat[,1]=subcases$originalDocId
+finalTxtMat[,2]=subcases$sno
+finalTxtMat[,3]=txt
+
+#donvert the sentences to domain sentences
+for(i in 1:nrow(finalTxtMat))
+{
+   finalTxtMat[i,3]=applyDomainWords(finalTxtMat[i,3],domainWords)
+}
+
+
+
+# docSentenceMapping=matrix(nrow=NROW(subcases),ncol=2)
+# docSentenceMapping[,1]=subcases$sno
+# docSentenceMapping[,2]=subcases$originalDocId
+# 
+# 
+# tmp=finalTxtMat
+
+
+
+# for(i in 1:nrow(tmp))
+# {
+#   finalTxtMat[i,1]=docSentenceMapping[i,2]
+# }
+
+
+
+
+```
+now prepare the corpus
+
+```{r}
+
+txtCorpus=finalTxtMat[,3]
+corpus=Corpus(VectorSource(txtCorpus))
+stop_words=getStopWordsList()
+corpus=tm_map(corpus,removeWords,c(stop_words))
+
+corpus <- tm_map(corpus, PlainTextDocument)
+#creating the document term matrix
+dtm = DocumentTermMatrix(corpus)
+dtm
+
+#creating the term document matrix which is the transpose o fthe dtm
+#tdm <- TermDocumentMatrix(corpus)
+#tdm
+
+
+#removing the sparse terms from the dtm
+sparseDtm=removeSparseTerms(dtm,0.999)
+sparseDtm
+
+#vectors=as.matrix(sparseDtm)
+
+
+#saving the matrix to teh excel sheet for future
+#m <- as.matrix(sparseDtm)   
+#dim(m)   
+#write.csv(m, file="sparseDtm.csv") 
+
+
+```
+
+
+```{r}
+
+getIDFForTerm=function(term,mat)
+{
+  #mat=as.matrix(dtm)
+  N=nrow(mat)
+  df=length(which(mat[,term]>0))
+  idf=log2(N/df)
+  return(idf)
+}
+
+myWeightTfIDf<-function(mat)
+{
+  #mat=as.matrix(dtm)
+  #get the term normalized freq
+  tf=log2(1+log2(1+mat))
+  #tf=log2(1+mat)
+  
+  #idf
+  #N=nrow(m)
+  #apply(mat, MARGIN=1, FUN=getIDFForTerm(x))
+  
+  #df=length(which(m[,term]>0))
+  #idf=log2(N/df)
+  cc<-colnames(tf)
+  idfs<-sapply(cc,getIDFForTerm,mat)
+  
+  numRows=nrow(tf)
+  numCol=ncol(tf)
+  for(i in 1:numRows)
+  {
+    for(j in 1:numCol)
+    {
+      if(tf[i,j]>0)
+        tf[i,j]=tf[i,j]*idfs[j]
+      
+    }
+  }
+  
+  return(tf)
+}
+
+applyTFIDFWeightage=function()
+{
+  dtm_tfidf<-myWeightTfIDf(as.matrix(sparseDtm))
+  m=dtm_tfidf
+  N=nrow(m)
+  #get the normalize lengths of the vectors. 
+  docNormalizedLengths=norm_eucl(m)
+  finalDocSet=m[1:N,]
+  input <- finalDocSet/docNormalizedLengths[1:N]
+  return(input)
+ 
+}
+
+
+```
+
+
+Add the tf-idf score for the sparsematrix
+
+```{r}
+
+
+#comment out this if the vectors dont use the wirght
+#vectors=applyTFIDFWeightage()
+
+vectors=as.matrix(sparseDtm)
+
+```
+
+
+
+Create the vocabulary of terms
+```{r}
+#stop_words=tolower(stop_words)
+# remove terms that are stop words or occur fewer than 3 times:
+#del <- tolower(names(term.table)) %in% stop_words 
+#term.table <- term.table[!del]
+#vocab <- names(term.table)
+
+vocab=colnames(sparseDtm)
+# vocab=unique(stemDocument(vocab))
+# 
+# lenVocab=length(vocab)
+# for(j in 1:nrow(domainWords))
+# {
+#   for(k in 1:N)
+#   {
+#     if(vocab[k]==domainWords$original[j])
+#     {
+#       #cat("mapped found",dd[k])
+#       vocab[k]=domainWords$mapped[j]
+#     }  
+#   }
+# }
+
+
+```
+
+```{r}
+
+# now put the documents into the format required by the lda package:
+get.terms <- function(x) {
+  index <- match(x, vocab)
+  index <- index[!is.na(index)]
+  rbind(as.integer(index - 1), as.integer(rep(1, length(index))))
+}
+doc.list <- strsplit(txtCorpus, "[[:space:]]+")
+documents <- lapply(doc.list, get.terms)
+
+# Compute some statistics related to the data set:
+D <- length(documents)
+W <- length(vocab)  
+doc.length <- sapply(documents, function(x) sum(x[2, ])) 
+N <- sum(doc.length)  
+#term.frequency <- as.integer(term.table)
+
+K <- 50
+G <- 1000
+#contros the per document topic sistribution
+alpha <- 0.02
+#controls the per topic words distribution
+eta <- 0.02
+
+# Fit the model:
+set.seed(357)
+t1 <- Sys.time()
+fit <- lda.collapsed.gibbs.sampler(documents = documents, K = K, vocab = vocab, 
+                                   num.iterations = G, alpha = alpha, 
+                                   eta = eta, initial = NULL, burnin = 0,
+                                   compute.log.likelihood = TRUE)
+t2 <- Sys.time()
+t2 - t1  
+
+theta <- t(apply(fit$document_sums + alpha, 2, function(x) x/sum(x)))
+colnames(theta)<-c(1:K)
+phi <- t(apply(t(fit$topics) + eta, 2, function(x) x/sum(x)))
+
+results <- list(phi = phi,
+                theta = theta,
+                doc.length = doc.length,
+                vocab = vocab,
+                term.frequency = term.frequency)
+
+json <- createJSON(phi = results$phi, 
+                   theta = results$theta, 
+                   doc.length = results$doc.length, 
+                   vocab = results$vocab, 
+                   term.frequency = results$term.frequency)
+write(json, file="export_small1.JSON")
+
+
+serVis(json, out.dir = 'vis4', open.browser = FALSE)
+
+
+```
+
+Find the sentences from the cases
+
+```{r}
+
+getStopWordsList=function()
+{
+  
+  #stop_words=tolower(stop_words)
+  
+ stop_words=stopwords("english")
+  #stop_words=stopwordsList$stopword
+  stop_words = c(stop_words, LETTERS,"BR","br")
+  
+  
+ stop_words=c(stop_words,"aren't","can't","couldn't","didn't","doesn't","don't","hadn't","hasn't","haven't","he'd","he'll","here's","he's","how's","i'd","i'll","i'm","isn't","it's","i've","let's","mustn't","shan't","she'd","she'll","she's","shouldn't","that's","there's","they'd","they'll","they're","they've","wasn't","we'd","we'll","we're","weren't","we've","what's","when's","where's","who's","why's","won't","wouldn't","you'd","you'll","you're","you've","data","advised","close","additional","resolution","generating","issue","unit","information","ai","predix","update")
+  stop_words=tolower(stop_words)
+  return(stop_words)
+  
+}
+
+
+getSentencesFromText=function(txt,domainWords)
+{
+  require("openNLP")
+  
+  
+  finalSentences=matrix(nrow=20000,ncol=3)
+  
+  count=0;
+  for(i in 1:NROW(txt))
+  {
+    #i=1
+    s <- as.String(txt[i])
+    sent_token_annotator <- Maxent_Sent_Token_Annotator()
+    a1 <- annotate(s, sent_token_annotator)
+    
+    ##
+    len=length(s[a1])
+    if(len==1)
+    {
+      
+      #print(s[a1][j])
+      rr=removeStopWordsFromSentence(s[a1],domainWords)
+      if(stringr::str_length(rr)>5)
+      {
+        count=count+1
+        finalSentences[count,1]=i
+        finalSentences[count,2]=count
+        finalSentences[count,3]=rr
+      }
+    }else{
+      for(j in 1:len)
+      {
+        rr=removeStopWordsFromSentence(s[a1][j],domainWords)
+        if(stringr::str_length(rr)>5)
+        {
+          count=count+1
+          #print(s[a1][j])
+          finalSentences[count,1]=i
+          finalSentences[count,2]=count
+          finalSentences[count,3]=rr
+        }
+      }
+    }
+  }
+
+  return(finalSentences)
+}
+
+
+
+removeStopWordsFromSentence=function(sentence,domainWords)
+{
+  #sentence=txtCorpus[10]
+  #domainWords=domainWords
+  stop_words=getStopWordsList()
+  #remove the punctuation and other stuff
+  
+  sentence <- gsub("'", "", sentence)  # remove apostrophes
+  #sentence <- gsub("[[:punct:]]", " ", sentence)  # replace punctuation with space
+  sentence <- gsub("[[:cntrl:]]", " ", sentence)  # replace control characters with space
+  sentence <- gsub("^[[:space:]]+", "", sentence) # remove whitespace at beginning of documents
+  sentence <- gsub("[[:space:]]+$", "", sentence) # remove whitespace at end of documents
+  sentence <- gsub("[[:digit:]]+", "", sentence)
+  #remove all teh crazy characters
+  #sentence=stringr::str_replace_all(sentence, "[^a-zA-Z0-9]", " ")
+  sentence <- gsub("^[[:space:]]+", "", sentence) # remove whitespace at beginning of documents
+  sentence <- gsub("[[:space:]]+$", "", sentence) # remove whitespace at end of documents
+
+  
+  doc.list <- unlist(strsplit(sentence, "[[:space:]]+"))
+  
+  
+  #doc.list<-tolower(doc.list)
+  del <- doc.list %in% stop_words 
+  doc.list <- doc.list[!del]
+  N=length(doc.list)
+  #now appy the domain transation
+#   for(j in 1:nrow(domainWords))
+#   {
+#     for(k in 1:N)
+#     {
+#       if(doc.list[k]==domainWords$original[j])
+#       {
+#         #cat("mapped found",dd[k])
+#         doc.list[k]=domainWords$mapped[j]
+#       }  
+#     }
+#   }
+#   
+  
+  
+  if(length(doc.list)>=2)
+  {
+    finalSentence=paste(doc.list,collapse=" ")
+  
+    return(finalSentence)
+  }else
+    return("")
+  
+}
+
+
+applyDomainWords=function(sentence,domainWords)
+{
+  doc.list <- unlist(strsplit(sentence, "[[:space:]]+"))
+  N=length(doc.list)
+  #now appy the domain transation
+  for(j in 1:nrow(domainWords))
+  {
+    for(k in 1:N)
+    {
+      if(doc.list[k]==domainWords$original[j])
+      {
+        #cat("mapped found",dd[k])
+        doc.list[k]=domainWords$mapped[j]
+      }  
+    }
+  }
+  return(paste(doc.list,collapse=" "))
+}
+
+
+```
+
+
+
+
+
+https://github.com/tillbe/jsd/blob/master/R/divergence.R
+
+```{r}
+shanonDivergence<-function(p,q)
+{
+  m <- 0.5 * (p + q)
+JS <- 0.5 * (sum(p * log(p / m)) + sum(q * log(q / m)))
+return(JS)
+}
+
+JSD = function(P, Q) {
+    M = (P + Q)/2
+    jsd = 0.5 * KLD(P, M) + 0.5 * KLD(Q, M)
+    return(jsd)
+}
+
+KLD = function(A, B) {
+    sum(A * log(A/B))
+}
+
+COSDIST=function(A,B,vectors){
+ 
+  #printf("from cosine %d%d",A,B) 
+  library(lsa)
+  return (acos(cosine(vectors[A,],vectors[B,]))*57.30)
+}
+
+
+```
+
+Distribution functions
+```{r}
+
+getTopNDocumentsForTopic=function(topicId,fit,N=10)
+{
+  top.topic.documents(fit$document_sums,num.documents = N,alpha=0.02)[,topicId]
+}
+
+getTopNWordsForTopic=function(topicId,phi,N=10)
+{
+  top.topic.words(phi,num.words = N)[,topicId]
+}
+#another way to getTopNWordsForTopic
+getTopicWords=function(topicId,phi)
+{
+  return(sort(phi[topicId,],decreasing = TRUE)[1:10])
+}
+
+#for a given document which ar ethe moset favorable topics
+getTopTopicsForDocument=function(docId,theta,N=5)
+{
+  return(sort(theta[docId,],decreasing = TRUE)[1:N])
+}
+
+getVectorRepresentation=function(docId)
+{
+  return (paste(names(which(vectors[docId,]>0)),collapse = ";"))
+}
+
+#basically the sentenceId is the rownumber in the finalTxtMat. The first column is the documentId
+getDocIdFromSentenceId=function(sentenceId,finalTxtMat)
+{
+  return(finalTxtMat[sentenceId,1])
+  
+}
+
+getSentencesFromDocId=function(docId,finalTxtMat)
+{
+   indexes=which(finalTxtMat[,1]==docId)
+   print(indexes)
+   
+   return(finalTxtMat[indexes,3])
+}
+
+
+#print functionality
+printf <- function(...)print(sprintf(...))
+
+
+getTopicSimilarity=function()
+{
+  #get the topic to topic similarity
+  for(j in 1:K)
+  {
+    p<-phi[j,]
+  
+    count=0;
+    for(i in 1:K)
+    {
+      q<-phi[i,]
+      
+      js=JSD(p,q)
+      
+      if(js<0.4)
+      {
+        count=count+1;
+        printf("topic %d, topic %d,%f",j,i,js)
+        #print(js);
+      }
+      
+    }
+  }
+}
+
+
+getSimilarDocuments=function(docId,theta,vectors,threshold=0.2)
+{
+  #theta=theta
+  #vectors=vectors
+  #threshold=0.1
+  #docId=1
+  
+  len=NROW(txtCorpus)
+  p<-theta[docId,]
+  count=0
+  outputMat=matrix(nrow = 100,ncol = 6)
+  for(i in 1:len)
+  {
+   # i=2
+    q<-theta[i,]
+    
+    js=JSD(p,q)
+    cosSim=COSDIST(docId,i,vectors)
+    if(js<threshold & cosSim<70)
+    {
+      count=count+1;
+      
+      originalDocId=finalTxtMat[docId,1]
+      matchingDocId=finalTxtMat[i,1]
+      outputMat[count,1]=as.integer(as.character(originalDocId))
+      outputMat[count,2]=docId
+      outputMat[count,3]=as.integer(as.character(matchingDocId))
+      outputMat[count,4]=i
+      outputMat[count,5]=js
+      outputMat[count,6]=cosSim
+      printf("%d,%d,,%d,%f,%f",count,docId,i,js,cosSim)
+      #cat(count,originalDocId,docId,matchingDocId,i,js,cosSim)
+      
+      #return the combined value
+      
+      #print(js);
+    }
+    
+  }
+  return(outputMat)
+}
+
+
+
+
+drawDistributionOfTopics=function(docId,theta)
+{
+  distribution=theta[docId,]
+  #barplot(theta[1942,]*100)
+  barplot(distribution*100,main=docId)
+}
+
+
+```
+
+Find the similarity between two documents (sentences)
+
+```{r}
+
+findSimilarity=function(docA,docB)
+{
+  print(txtCorpus[docA])
+  topicA=getTopTopicsForDocument(docA,theta)
+  print(topicA)
+  print(getTopTopicsForDocument(docB,theta))
+  #print(getTopNWordsForTopic(topicA[1],phi))
+  print(txtCorpus[docB])
+  
+  par(mfrow=c(1,2))
+  
+  #print(which(vectors[docA,]>0))
+  #print(which(vectors[docB,]>0))
+  
+  drawDistributionOfTopics(docA,theta = theta)
+  drawDistributionOfTopics(docB,theta = theta)
+  
+}
+
+```
+
+Create a similarity matrix containing the similarity among the sentences
+
+```{r}
+##create the similairty matrix for the sentences
+similarityMatrix=matrix(nrow=30000,ncol=8)
+count=1
+#find similarity for all the documents
+#NROW(txtCorpus)
+for(i in 200:400)
+{
+  #i=1
+  #get the similarity for each sentence
+  cc=getSimilarDocuments(docId = i, theta = theta, vectors = vectors,threshold = 0.1)
+  #simailarityMatrix<-rbind(simailarityMatrix,cc)
+  
+  cc=na.omit(cc)
+  for(j in 1:nrow(cc))
+  {
+    #original docId
+    similarityMatrix[count,1]=cc[j,1]
+    #original sentenceId
+    similarityMatrix[count,2]=cc[j,2]
+    #original sentence vector
+    similarityMatrix[count,3]=getVectorRepresentation(cc[j,2])
+    #matching docid
+    similarityMatrix[count,4]=cc[j,3]
+    #matching sentenceId
+    similarityMatrix[count,5]=cc[j,4]
+    #matching sentence vector
+    similarityMatrix[count,6]=getVectorRepresentation(cc[j,4])
+    #JS score
+    similarityMatrix[count,7]=cc[j,5]
+    #cosine Score
+    similarityMatrix[count,8]=cc[j,6]
+    
+    count=count+1
+  }
+}
+
+
+```
+
+
+
+```{r}
+
+xx=na.omit(similarityMatrix)
+write.csv(xx, file="LDA_ouput_final2.csv")
+
+
+
+##how to give the relevance score...?
+##basica
+
+
+
+
+
+
+
+```
+
+
+```{r}
+######################################################################
+
+#test
+docA=1
+getSimilarDocuments(docA,theta,vectors,threshold = 0.1)
+
+findSimilarity(docA,1895)
+getTopNWordsForTopic(30,phi)
+
+
+
+#once the similarity matrix has been created we need to add the detaiks about the sentence and the original caseid so as to say 
+
+```
+
+Read the csv file
+```{r}
+options(StringsAsFactors=F)
+dd=read.csv("LDA_ouput1.csv")
+#add the original doc number
+
+dd$docId1=dd$SentNum1
+dd$docId2=dd$SentNum2
+for(i in 1:NROW(dd))
+{
+  dd$docId1[i]=finalTxtMat[dd$SentNum1[i],1]
+  
+}
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+try out the context analysis
+
+```{r}
+
+testVocab=colnames(sparseDtm)
+
+
+getCleanTextualInfo=function(txt,domainWords)
+{
+  finalSentences=matrix(nrow=20000,ncol=3)
+  count=0;
+  for(i in 1:NROW(txt))
+  {
+    #i=1
+    s <- as.String(txt[i])
+      #print(s[a1][j])
+    rr=removeStopWordsFromSentence(s,domainWords)
+    if(stringr::str_length(rr)>5)
+    {
+      count=count+1
+      finalSentences[count,1]=i
+      finalSentences[count,2]=count
+      finalSentences[count,3]=rr
+    }
+  }
+  return(finalSentences)
+}
+
+
+
+
+
+
+head(finalTxtMat)
+
+testword="bearing"
+
+doc.list <- strsplit(txtCorpus, "[[:space:]]+")
+
+
+
+
+tokens <-  tolower(unlist(doc.list))
+tokens2 <- tolower(c(tokens[-1], "."))
+tokens3 <- tolower(c(tokens2[-1], "."))
+tokens4 <- tolower(c(tokens3[-1], "."))
+tokens5 <- tolower(c(tokens4[-1], "."))
+
+
+contextWords <- sort(table(paste(tokens, tokens2,tokens3, tokens4,tokens5)), decreasing=T)
+contextWords <- sort(table(paste(tokens, tokens2,tokens3)), decreasing=T)
+
+bOk=which(contextWords>10)
+contextWords<-contextWords[bOk]
+
+contextWords
+
+
+
+
+
+
+
+
+
+```
