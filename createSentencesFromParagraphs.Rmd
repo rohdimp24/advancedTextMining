@@ -1,0 +1,192 @@
+---
+title: "clustering_usingLDA"
+output: html_document
+---
+
+```{r}
+mydb = dbConnect(MySQL(), user='root', password='', dbname='domainanalysis', host='localhost')
+library(tm)
+library(SnowballC)
+library(Matrix)
+library(lda)
+library(LDAvis)
+library(servr)
+
+
+#this is the subset 
+#subcases<-dbGetQuery(mydb, "SELECT * FROM `crmcleanupnew` LIMIT 2000")
+subcases<-dbGetQuery(mydb, "SELECT * FROM `autonormalizedss`")
+stopwordsList<-dbGetQuery(mydb, "SELECT stopword FROM `stopwordss`")
+domainWords<-dbGetQuery(mydb, "SELECT * FROM `domainwordss`")
+
+```
+perform the basic cleanup on the data 
+
+```{r}
+txt=subcases$original
+txt=tolower(txt)
+finalTxtMat=getSentencesFromText(txt,domainWords)
+
+finalTxtMat=na.omit(finalTxtMat)
+
+#donvert the sentences to domain sentences
+for(i in 1:nrow(finalTxtMat))
+{
+   finalTxtMat[i,3]=applyDomainWords(finalTxtMat[i,3],domainWords)
+}
+
+#add the sentences to the database..These are just the sentences on whihc we have to perform the n-gram replacements. 
+
+
+write.csv(finalTxtMat, file="sentences.csv")
+
+
+
+```
+now prepare the corpus
+
+
+```{r}
+
+getStopWordsList=function()
+{
+  
+  #stop_words=tolower(stop_words)
+  
+  stop_words=stopwordsList$stopword
+  stop_words = c(stop_words, LETTERS,"BR","br")
+  stop_words=c(stop_words,stopwords("english"))
+  
+ stop_words=c(stop_words,"aren't","can't","couldn't","didn't","doesn't","don't","hadn't","hasn't","haven't","he'd","he'll","here's","he's","how's","i'd","i'll","i'm","isn't","it's","i've","let's","mustn't","shan't","she'd","she'll","she's","shouldn't","that's","there's","they'd","they'll","they're","they've","wasn't","we'd","we'll","we're","weren't","we've","what's","when's","where's","who's","why's","won't","wouldn't","you'd","you'll","you're","you've","data","advised","close","additional","resolution","generating","issue","unit","information","ai","predix","update","â","Â")
+  stop_words=tolower(stop_words)
+  return(stop_words)
+  
+}
+
+
+getSentencesFromText=function(txt,domainWords)
+{
+  require("openNLP")
+  
+  
+  finalSentences=matrix(nrow=20000,ncol=3)
+  
+  count=0;
+  for(i in 1:NROW(txt))
+  {
+    #i=1
+    s <- as.String(txt[i])
+    sent_token_annotator <- Maxent_Sent_Token_Annotator()
+    a1 <- annotate(s, sent_token_annotator)
+    
+    ##
+    len=length(s[a1])
+    if(len==1)
+    {
+      
+      #print(s[a1][j])
+      rr=removeStopWordsFromSentence(s[a1],domainWords)
+      if(stringr::str_length(rr)>5)
+      {
+        count=count+1
+        finalSentences[count,1]=i
+        finalSentences[count,2]=count
+        finalSentences[count,3]=rr
+      }
+    }else{
+      for(j in 1:len)
+      {
+        rr=removeStopWordsFromSentence(s[a1][j],domainWords)
+        if(stringr::str_length(rr)>5)
+        {
+          count=count+1
+          #print(s[a1][j])
+          finalSentences[count,1]=i
+          finalSentences[count,2]=count
+          finalSentences[count,3]=rr
+        }
+      }
+    }
+  }
+
+  return(finalSentences)
+}
+
+
+
+removeStopWordsFromSentence=function(sentence,domainWords)
+{
+  #sentence=txtCorpus[10]
+  #domainWords=domainWords
+  stop_words=getStopWordsList()
+  #remove the punctuation and other stuff
+  
+  sentence <- gsub("'", "", sentence)  # remove apostrophes
+  sentence <- gsub("[[:punct:]]", " ", sentence)  # replace punctuation with space
+  sentence <- gsub("[[:cntrl:]]", " ", sentence)  # replace control characters with space
+  sentence <- gsub("^[[:space:]]+", "", sentence) # remove whitespace at beginning of documents
+  sentence <- gsub("[[:space:]]+$", "", sentence) # remove whitespace at end of documents
+  sentence <- gsub("[[:digit:]]+", "", sentence)
+  #remove all teh crazy characters
+  sentence=stringr::str_replace_all(sentence, "[^a-zA-Z0-9]", " ")
+  sentence <- gsub("^[[:space:]]+", "", sentence) # remove whitespace at beginning of documents
+  sentence <- gsub("[[:space:]]+$", "", sentence) # remove whitespace at end of documents
+
+  
+  doc.list <- unlist(strsplit(sentence, "[[:space:]]+"))
+  
+  
+  #doc.list<-tolower(doc.list)
+  del <- doc.list %in% stop_words 
+  doc.list <- doc.list[!del]
+  N=length(doc.list)
+  #now appy the domain transation
+#   for(j in 1:nrow(domainWords))
+#   {
+#     for(k in 1:N)
+#     {
+#       if(doc.list[k]==domainWords$original[j])
+#       {
+#         #cat("mapped found",dd[k])
+#         doc.list[k]=domainWords$mapped[j]
+#       }  
+#     }
+#   }
+#   
+  
+  
+  if(length(doc.list)>2)
+  {
+    finalSentence=paste(doc.list,collapse=" ")
+  
+    return(finalSentence)
+  }else
+    return("")
+  
+}
+
+
+applyDomainWords=function(sentence,domainWords)
+{
+  doc.list <- unlist(strsplit(sentence, "[[:space:]]+"))
+  N=length(doc.list)
+  #now appy the domain transation
+  for(j in 1:nrow(domainWords))
+  {
+    for(k in 1:N)
+    {
+      if(doc.list[k]==domainWords$original[j])
+      {
+        #cat("mapped found",dd[k])
+        doc.list[k]=domainWords$mapped[j]
+      }  
+    }
+  }
+  return(paste(doc.list,collapse=" "))
+}
+
+
+```
+
+
+
