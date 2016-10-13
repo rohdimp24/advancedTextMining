@@ -9,13 +9,17 @@ I could see some of the cases that are similar even if there are few extra words
 
 
 ```{r}
-mydb = dbConnect(MySQL(), user='root', password='', dbname='domainanalysis', host='localhost')
+library(RMySQL)
 library(tm)
 library(SnowballC)
 library(Matrix)
 library(lda)
 library(LDAvis)
 library(servr)
+
+
+mydb = dbConnect(MySQL(), user='root', password='', dbname='domainanalysis', host='localhost')
+
 
 
 #this is the subset 
@@ -84,6 +88,11 @@ dtm
 #removing the sparse terms from the dtm
 sparseDtm=removeSparseTerms(dtm,0.999)
 sparseDtm
+
+m=as.matrix(sparseDtm)
+
+rownames(m)<-c(1:NROW(txt))
+write.csv(m, file="forSentenceLDA")
 
 #vectors=as.matrix(sparseDtm)
 
@@ -179,6 +188,7 @@ Create the vocabulary of terms
 #vocab <- names(term.table)
 
 vocab=colnames(sparseDtm)
+
 # vocab=unique(stemDocument(vocab))
 # 
 # lenVocab=length(vocab)
@@ -214,6 +224,7 @@ W <- length(vocab)
 doc.length <- sapply(documents, function(x) sum(x[2, ])) 
 N <- sum(doc.length)  
 #term.frequency <- as.integer(term.table)
+term.frequency <- as.integer(colSums(as.matrix(sparseDtm)))
 
 K <- 50
 G <- 1000
