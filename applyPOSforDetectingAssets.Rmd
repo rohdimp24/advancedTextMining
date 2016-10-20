@@ -1,0 +1,646 @@
+---
+title: "clustering_usingLDA"
+output: html_document
+---
+this program calculates the P(W2|W1) contextual informations. 
+the thing that is missing is the stemming that is required to put an end to the repeated forms  like vibration, vibrations
+
+
+
+```{r}
+options(java.parameters = "- Xmx1024m")
+
+mydb = dbConnect(MySQL(), user='root', password='', dbname='domainanalysis', host='localhost')
+library(Matrix)
+library(stringr)
+library("openNLP")
+  
+
+
+#this is the subset 
+#subcases<-dbGetQuery(mydb, "SELECT * FROM `crmcleanupnew` LIMIT 2000")
+subcases<-dbGetQuery(mydb, "SELECT id,description FROM `smartsignal_jim_allfields` LIMIT 5000")
+stopwordsList<-dbGetQuery(mydb, "SELECT stopword FROM `stopwordss`")
+domainWords<-dbGetQuery(mydb, "SELECT * FROM `domainwordss`")
+
+```
+perform the basic cleanup on the data 
+
+```{r}
+txt=subcases$description
+txt=tolower(txt)
+
+```
+
+
+```{r}
+
+getStopWordsList=function()
+{
+  
+  #stop_words=tolower(stop_words)
+  
+  stop_words=stopwordsList$stopword
+  stop_words = c(stop_words, LETTERS,"BR","br")
+  stop_words=c(stop_words,stopwords("english"))
+  
+ stop_words=c(stop_words,"aren't","can't","couldn't","didn't","doesn't","don't","hadn't","hasn't","haven't","he'd","he'll","here's","he's","how's","i'd","i'll","i'm","isn't","it's","i've","let's","mustn't","shan't","she'd","she'll","she's","shouldn't","that's","there's","they'd","they'll","they're","they've","wasn't","we'd","we'll","we're","weren't","we've","what's","when's","where's","who's","why's","won't","wouldn't","you'd","you'll","you're","you've","data","advised","close","additional","resolution","generating","issue","unit","information","ai","predix","update","â","Â","m s","mm s","us cm","lbm hr","iprc","kg hr","xmtr","hs rot","ims gen","ims rot","ti","m s")
+  stop_words=tolower(stop_words)
+  return(stop_words)
+  
+}
+
+
+
+isStopWord=function(testWord)
+{
+  stop_words=getStopWordsList()
+  #remove the punctuation and other stuff
+  
+  testWord <- gsub("'", "", testWord)  # remove apostrophes
+  testWord <- gsub("[[:punct:]]", " ", testWord)  # replace punctuation with space
+  testWord <- gsub("[[:cntrl:]]", " ", testWord)  # replace control characters with space
+  testWord <- gsub("^[[:space:]]+", "", testWord) # remove whitespace at beginning of documents
+  testWord <- gsub("[[:space:]]+$", "", testWord) # remove whitespace at end of documents
+  testWord <- gsub("[[:digit:]]+", "", testWord)
+  #remove all teh crazy characters
+  testWord=stringr::str_replace_all(testWord, "[^a-zA-Z0-9]", " ")
+  testWord <- gsub("^[[:space:]]+", "", testWord) # remove whitespace at beginning of documents
+  testWord <- gsub("[[:space:]]+$", "", testWord) # remove whitespace at end of documents
+
+  
+  if(testWord %in% stop_words)
+    return("NA")
+  else
+    return(testWord)
+  
+}
+
+
+applyDomainWord=function(testWord)
+{
+  
+  for(j in 1:nrow(domainWords))
+  {
+     if(testWord==domainWords$original[j])
+      {
+        #cat("mapped found",dd[k])
+        testWord=domainWords$mapped[j]
+      }  
+  }
+  
+  return(testWord)
+}
+
+
+
+
+getPOS=function(s)
+{
+  #s=txt[166]
+  s<-unlist(s)
+  s <- as.String(s)
+  
+  ## Need sentence and word token annotations.
+  sent_token_annotator <- Maxent_Sent_Token_Annotator()
+  word_token_annotator <- Maxent_Word_Token_Annotator()
+  a2 <- annotate(s, list(sent_token_annotator, word_token_annotator))
+  pos_tag_annotator <- Maxent_POS_Tag_Annotator()
+  a3 <- annotate(s, pos_tag_annotator, a2)
+  #a3
+  ## Variant with POS tag probabilities as (additional) features.
+  #head(annotate(s, Maxent_POS_Tag_Annotator(probs = TRUE), a2))
+  
+  #from http://www.inside-r.org/packages/cran/openNLP/docs/Maxent_POS_Tag_Annotator
+  a3w <- subset(a3, type == "word")
+  tags <- sapply(a3w$features, `[[`, "POS")
+  #tags
+  #table(tags)
+  #print(table(tags))
+  #sprintf("%s/%s", s[a3w], tags)
+  #to displayu only the nouns
+  # nnp=""
+  # nn=""
+  # nns=""
+  # nnps=""
+  # vbg=""
+#   nouns=c()
+#   verbs=c()
+#   adjectives=c()
+#   adverbs=c()
+#   pronouns=c()
+#   
+  
+  indexNouns=c()
+  indexVerbs=c()
+  indexAdjectives=c()
+  indexAdverbs=c()
+  indexPronouns=c()
+  
+  
+  ##################### NOUNS ###############################
+  if(length(which(tags=="NN"))>0)
+  {
+    indexNouns<-c(indexNouns,which(tags=="NN"))
+  }
+  if(length(which(tags=="NNS"))>0)
+  {
+    indexNouns<-c(indexNouns,which(tags=="NNS"))
+  }
+  if(length(which(tags=="NNPS"))>0)
+  {
+    indexNouns<-c(indexNouns,which(tags=="NNPS"))
+  }
+  if(length(which(tags=="NNP"))>0)
+  {
+    indexNouns<-c(indexNouns,which(tags=="NNP"))
+  }
+  
+  ############### VERBS ##################################
+  if(length(which(tags=="VBG"))>0)
+  {
+    indexVerbs<-c(indexVerbs,which(tags=="VBG"))
+  }
+  if(length(which(tags=="VB"))>0)
+  {
+    indexVerbs<-c(indexVerbs,which(tags=="VB"))
+  }
+  if(length(which(tags=="VBD"))>0)
+  {
+    indexVerbs<-c(indexVerbs,which(tags=="VBD"))
+  }
+  if(length(which(tags=="VBN"))>0)
+  {
+    indexVerbs<-c(indexVerbs,which(tags=="VBN"))
+  }
+  if(length(which(tags=="VBZ"))>0)
+  {
+    indexVerbs<-c(indexVerbs,which(tags=="VBZ"))
+  }
+  if(length(which(tags=="VBP"))>0)
+  {
+    indexVerbs<-c(indexVerbs,which(tags=="VBP"))
+  }
+  
+  ################ ADJECTIVES ##################################
+  if(length(which(tags=="JJ"))>0)
+  {
+    indexAdjectives<-c(indexAdjectives,which(tags=="JJ"))
+  }
+  if(length(which(tags=="JJR"))>0)
+  {
+    indexAdjectives<-c(indexAdjectives,which(tags=="JJR"))
+  }
+  if(length(which(tags=="JJS"))>0)
+  {
+    indexAdjectives<-c(indexAdjectives,which(tags=="JJS"))
+  }
+  
+  
+  #####################ADVERB#####################################
+  
+  if(length(which(tags=="RB"))>0)
+  {
+    indexAdverbs<-c(indexAdverbs,which(tags=="RB"))
+  }
+  if(length(which(tags=="RBR"))>0)
+  {
+    indexAdverbs<-c(indexAdverbs,which(tags=="RBR"))
+  }
+  if(length(which(tags=="RBS"))>0)
+  {
+    indexAdverbs<-c(indexAdverbs,which(tags=="RBS"))
+  }
+  
+
+  #################PRONOUNS#######################
+  if(length(which(tags=="PRP"))>0)
+  {
+    indexPronouns<-c(indexPronouns,which(tags=="PRP"))
+  }
+  if(length(which(tags=="PRP$"))>0)
+  {
+    indexPronouns<-c(indexPronouns,which(tags=="PRP$"))
+  }
+  
+  
+  
+  
+  # 
+  # #to get the comma seperated lis that can be used in the notepad to do some manuall inspection
+  # #print(paste(nnp,collapse = ","))
+  # #print(paste(nns,collapse = ","))
+  # #print(paste(nnps,collapse = ","))
+  # #print(paste(nn,collapse = ","))
+  # 
+  # return (list("NN"=nn,"NNP"=nnp,"NNPS"=nnps,"NNS"=nns,"VBG"=vbg,"tags"=tags,"a3w"=a3w))
+    #return(list("tags"=tags,"a3w"=a3w,"sw"=s[a3w]))
+  if(length(indexVerbs)==0)
+    verbs="NA"
+  else
+    verbs=s[a3w[indexVerbs]]
+  
+  if(length(indexNouns)==0)
+      nouns="NA"
+  else
+      nouns=s[a3w[indexNouns]]
+  
+   if(length(indexAdverbs)==0)
+      adverbs="NA"
+    else
+      adverbs=s[a3w[indexAdverbs]]
+
+  if(length(indexAdjectives)==0)
+      adjectives="NA"
+    else
+      adjectives=s[a3w[indexAdjectives]]
+  
+  if(length(indexPronouns)==0)
+      pronouns="NA"
+    else
+      pronouns=s[a3w[indexPronouns]]
+  
+    
+#       
+#     return (list("nouns"=s[a3w[indexNouns]],"verbs"="NA"))
+#   if(length(indexNouns)==0)
+#     return (list("nouns"="NA","verbs"=s[a3w[indexVerbs]]))
+    
+  return(list("nouns"=nouns,"verbs"=verbs,"adjectives"=adjectives,"adverbs"=adverbs,"pronouns"=pronouns))
+}
+
+```
+
+
+
+```{r}
+
+
+findPOSRawResults=function(startIndex,endIndex,resultWords)
+{
+  count=0
+  
+  for(i in startIndex:endIndex)
+  {
+  #  i=1
+    print(i)
+    s=txt[i]
+    if(str_length(s)>10)
+    {
+      tt=getPOS(s)
+      for(k in 1:length(tt$nouns))
+      {
+        count=count+1
+        word=isStopWord(tt$nouns[[k]])
+        word=applyDomainWord(word)
+        
+        resultWords[count,1]=tt$nouns[[k]]
+        resultWords[count,2]=word
+        resultWords[count,3]="N"
+        resultWords[count,4]=subcases$id[i]
+      }
+      for(k in 1:length(tt$verbs))
+      {
+        count=count+1
+        word=isStopWord(tt$verbs[[k]])
+        word=applyDomainWord(word)
+        
+        resultWords[count,1]=tt$verbs[[k]]
+        resultWords[count,2]=word
+        resultWords[count,3]="V"
+        resultWords[count,4]=subcases$id[i]
+      }
+      
+      for(k in 1:length(tt$adjectives))
+      {
+        count=count+1
+        word=isStopWord(tt$adjectives[[k]])
+        word=applyDomainWord(word)
+        
+        resultWords[count,1]=tt$adjectives[[k]]
+        resultWords[count,2]=word
+        resultWords[count,3]="J"
+        resultWords[count,4]=subcases$id[i]
+      }
+      
+      for(k in 1:length(tt$adverbs))
+      {
+        count=count+1
+        word=isStopWord(tt$adverbs[[k]])
+        word=applyDomainWord(word)
+        
+        resultWords[count,1]=tt$adverbs[[k]]
+        resultWords[count,2]=word
+        resultWords[count,3]="R"
+        resultWords[count,4]=subcases$id[i]
+      }
+      
+      for(k in 1:length(tt$pronouns))
+      {
+        count=count+1
+        word=isStopWord(tt$pronouns[[k]])
+        word=applyDomainWord(word)
+        
+        resultWords[count,1]=tt$pronouns[[k]]
+        resultWords[count,2]=word
+        resultWords[count,3]="P"
+        resultWords[count,4]=subcases$id[i]
+      }
+      
+      
+      
+    }
+    gc()
+  }
+  
+  return(resultWords)
+}
+
+
+```
+
+
+```{r}
+
+identifyPOSFinalDist=function(inputFile)
+{
+    wordDistMat=matrix(nrow = 1000,ncol = 7)
+    colnames(wordDistMat)=c("word","J","N","P","R","V","Final")
+    wordList=read.csv(inputFile)
+    wordList=na.omit(wordList)
+    summary(wordList$V2)
+    #get the top words
+    head(sort(table(wordList$V2),decreasing = TRUE),50)
+    
+    #get the words which have occured atleast 10 times 
+    #sortedWords=sort(table(wordList$V2)>10,decreasing = TRUE)
+    sortedWords=names(which(sort(table(wordList$V2),decreasing = TRUE)>10))
+    #to get distribution for a particular word
+    count=0
+    for(i in 1:length(sortedWords))
+    {
+      #check if the sorted word is a unigram or multiple words. we are not looking for bigrams at this point
+      #most of the words appear as a result of removing / 
+      if(length(strsplit(sortedWords[i], " ")[[1]])==1)
+       {
+     
+        dist=(table(wordList$V3,wordList$V2==sortedWords[i])[,2])
+        count=count+1
+        wordDistMat[count,1]=sortedWords[i]
+        wordDistMat[count,2]=dist[1]
+        wordDistMat[count,3]=dist[2]
+        wordDistMat[count,4]=dist[3]
+        wordDistMat[count,5]=dist[4]
+        wordDistMat[count,6]=dist[5]
+        #this will find out verb or not verb
+        if((dist[1]+dist[2])<dist[5])
+          wordDistMat[count,7]="V"
+        else
+        {
+          if(dist[1]>dist[2])
+            wordDistMat[count,7]="J"
+          else
+            wordDistMat[count,7]="N"
+        }
+      }
+    }
+    return(wordDistMat)
+}
+
+```
+
+Renove the NA rows in the matrix
+```{r}
+removeNARowsFromMatrix=function(mat)
+{
+  ind <- apply(mat, 1, function(x) all(is.na(x)))
+  mat <-mat[ !ind, ]
+  return(mat)
+}
+
+```
+
+
+
+```{r}
+
+
+#this funct
+
+
+normalizePOSWordList=function(ngramWords,domainWords,wordFreq)
+{
+  
+  stemmedWords<-stemDocument(originalWords)
+
+  cosineMat=matrix(nrow=700,ncol=4)
+  k=1
+  #length(unigrams)
+  for(i in 1:length(originalWords))
+  {
+      cosineMat[k,1]=originalWords[i]
+      cosineMat[k,2]=stemmedWords[i]
+      cosineMat[k,3]=wordFreq[i]
+      cosineMat[k,4]=""
+      k=k+1
+  }
+  
+  
+  df=as.data.frame(cosineMat)
+  df=na.omit(df)
+  
+  #df=subset(df,df$V3==0)
+  #convert factor to number #http://stackoverflow.com/questions/7611810/converting-a-factor-to-numeric-without-losing-information-r-as-numeric-doesn
+  df$V1=as.character(df$V1)
+  df$V3=as.numeric(as.character(df$V3))
+  #df$V7=as.numeric(as.character(df$V7))
+  
+  index=which(table(df$V2)>0)
+  #nGroups=(df$V3[index])
+  groupNames=as.character(names(index))
+  size=length(groupNames)
+  
+  df$V2=as.character(df$V2)
+  df$V4=as.character(df$V4)
+  for(i in 1:size)
+  {
+    #i=2
+    #mapping=getStemmMapping(groupNames[i],df)
+    ss=subset(df,df$V2==groupNames[i])
+    #the order by the size of the string
+    ord=order(ss$V1,decreasing = FALSE)
+    mapping=as.character(ss[ord[1],1])
+    #cat("stem",groupNames[i],"\t")
+    #cat("mapping",mapping,"\n")
+    df[df$V2==groupNames[i],4]=mapping
+  }
+  
+  # the stemmermatrix will contain the mapping between the word and mapped word. e.g. closely mapped to close
+  stemmerMappingMatrix=matrix(nrow=nrow(df),ncol=2)
+  stemmerMappingMatrix[1:nrow(df),1]=df$V1
+  stemmerMappingMatrix[1:nrow(df),2]=df$V4
+  
+  
+  
+  matResult=matrix(nrow=length(ngramWords),ncol=2)
+  count=0
+  for(i in 1:length(ngramWords))
+  {
+    #i=1
+    matResult[i,1]=ngramWords[i]
+    #dd<-unlist(strsplit(ngramWords[i], "[[:space:]]+"))
+    #cat(dd[1],dd[2])
+    for(j in 1:nrow(stemmerMappingMatrix))
+    {
+      if(ngramWords[i]==stemmerMappingMatrix[j,1])
+      {
+          #cat("mapped found",dd[k])
+          ngramWords[i]=stemmerMappingMatrix[j,2]
+        
+      }  
+    }
+    
+    #replace the ngram with the domain word...vlv will become valve
+    for(j in 1:nrow(domainWords))
+    {
+      
+      if(ngramWords[i]==domainWords$original[j])
+      {
+        #cat("mapped found",dd[k])
+        ngramWords[i]=domainWords$mapped[j]
+      
+      }  
+      
+    }
+    
+    stopwordsList=getStopWordsList()
+    #remove the words that are part of the stopwords
+#     for(j in 1:nrow(stopwordsList))
+#     {
+#       
+#       if(ngramWords[i]==domainWords$original[j])
+#       {
+#         #cat("mapped found",dd[k])
+#         ngramWords[i]=domainWords$mapped[j]
+#       
+#       }  
+#       
+#     }
+    
+    if(!ngramWords[i] %in% stopwordsList)
+        matResult[i,2]=ngramWords[i]
+    else
+        matResult[i,2]<-NA
+    
+    #ngramWords[i]=paste(dd,collapse=" ")
+    
+ }
+  
+  #ngramWords=unique(ngramWords)
+  return(matResult)
+
+}
+
+
+#give the distribution list of the word and the POS type you are interensted in 
+GetWordListOfParticularTagPOS=function(POSType,distWordDF)
+{
+  
+  POSSpecficSubset=subset(distWordDF,distWordDF$Final==POSType)
+  POSSpecficSubset
+
+  originalWords=as.character(POSSpecficSubset$word)
+  wordFreq=as.numeric(as.character(POSSpecficSubset[,POSType]))
+
+  finalWords=normalizePOSWordList(domainWords = domainWords,ngramWords = originalWords,wordFreq=wordFreq)
+  
+  #remove the rows that have NA ..these are the stopwords row
+  finalWords=na.omit(finalWords)
+  
+  finalWordsList=unique(finalWords[,2])
+  return(finalWordsList)
+}
+
+
+```
+
+
+TEST
+```{r}
+#Find out the POS for the various cases in the database
+resultWords=matrix(nrow=20000,ncol=4)
+
+result=findPOSRawResults(4501,4999,resultWords)
+
+write.csv(result,"gg26.csv")
+head(result,50)
+
+###read the csv to tabulate the number of times a particular word has been classified as N,V,J,R###
+finalWordDistMat=identifyPOSFinalDist("pos_final.csv")
+finalWordDistMat=removeNARowsFromMatrix(finalWordDistMat)
+distDF=as.data.frame(finalWordDistMat)
+summary(distDF)
+
+
+write.csv(finalWordDistMat,"posDist.csv")
+
+
+
+
+###########GENERATE THE LIST OF WORDS CLASSIFIED AS NOUN AND VERB #################
+library(tm)
+library(SnowballC)
+
+listNouns=GetWordListOfParticularTagPOS(POSType = "N", distWordDF = distDF)
+listNouns
+listPronouns=GetWordListOfParticularTagPOS(POSType = "J", distWordDF = distDF)
+listPronouns
+listVerbs=GetWordListOfParticularTagPOS(POSType = "V", distWordDF = distDF)
+listVerbs
+
+
+
+##############################################################
+
+
+#somewhat,ti,
+
+##remove the onew that are stop words 
+##now we need to pass through the stemmer
+##
+
+
+
+#for tjhe adjectives it makes sense to madatorily find the bigrams
+
+
+# if(names(dist[1])=="J"&& names(dist[2])=="N")
+#     if(dist[1]>dist[2])
+#       
+
+#####THSI IS NOT WORKING ###################
+
+########### WHAT ARE THE MOST COMMON VERB FOR A GIVEN NOUN ###############
+
+cc=identifyPOSFinalDist("pos_final.csv")
+
+#these are the documents contains the word and it is appearing as a pronoun
+ll=wordList$V4[which(wordList$V2=="seal" & wordList$V3=="N")]
+
+#create a subset wih the cases with case if in ll
+rr=wordList[wordList$V4 %in% ll,]
+
+rr=na.omit(rr)
+
+#these are the nouns that have appeared in the documents
+nouns=unique(rr$V2[rr$V3=="N"])
+
+
+nouns[nouns %in% listNouns]
+
+#get all the verbs that present in those documents
+rr=subset(wordList,wordList$V4==6100)
+rr=na.omit(rr)
+
+
+```
