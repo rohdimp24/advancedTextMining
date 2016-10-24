@@ -1,0 +1,544 @@
+# Keyword Generator script
+24/Oct/2016: This script merges the two approaches together that is using the no dictionary system and with POS
+
+
+```{r}
+library(RMySQL)
+library(tm)
+library(SnowballC)
+library(Matrix)
+library(lda)
+library(LDAvis)
+library(servr)
+library(fpc)
+library(wordcloud)
+
+mydb = dbConnect(MySQL(), user='root', password='', dbname='domainanalysis', host='localhost')
+
+#this is the subset 
+#subcases<-dbGetQuery(mydb, "SELECT * FROM `crmcleanupnew`")
+#subcases<-dbGetQuery(mydb, "SELECT * FROM `originalss` limit 1000")
+subcases<-dbGetQuery(mydb, "SELECT id,description FROM `smartsignal_jim_allfields` ")
+#subcases<-dbGetQuery(mydb, "SELECT * FROM `predixstackoverflow`")
+stopwordsList<-dbGetQuery(mydb, "SELECT stopword FROM `stopwordss`")
+domainWords<-dbGetQuery(mydb, "SELECT * FROM `domainwordss`")
+
+
+```
+__read the text for which the keywords need to be generated__
+
+```{r}
+
+#txt=tolower(subcases$originalDescription)
+#txt=tolower(subcases$caseTitle)
+txt=tolower(subcases$case)
+txt=tolower(subcases$description)
+
+txt <- gsub("[[:punct:]]", " ", txt)  # replace punctuation with space
+txt <- gsub("[[:cntrl:]]", " ", txt)  # replace control characters with space
+txt <- gsub("^[[:space:]]+", "", txt) # remove whitespace at beginning of documents
+txt <- gsub("[[:space:]]+$", "", txt) # remove whitespace at end of documents
+txt <- gsub("[[:digit:]]+", "", txt)
+#remove only the numbers..while let the alphanumeric strings as it is 
+#http://stackoverflow.com/questions/21653294/how-to-remove-only-actual-numbers-from-a-string-of-characters-in-r
+
+txt<-gsub("\\b\\d+\\b", " ", txt)
+
+#txt <- tolower(txt)  # force to lowercase
+
+#remove only digits
+doc.list <- strsplit(txt, "[[:space:]]+")
+
+```
+
+
+## Helper functions
+
+
+__Get the stop words__
+```{r}
+
+#Get the stop words..you can add some more stop words which are not added in the db
+getStopWordsList=function(){
+  
+  #stop_words=tolower(stop_words)
+  
+  stop_words=stopwordsList$stopword
+  stop_words = c(stop_words, LETTERS,"BR","br")
+  
+  stop_words=c(stop_words,"aren't","can't","couldn't","didn't","doesn't","don't","hadn't","hasn't","haven't","he'd","he'll","here's","he's","how's","i'd","i'll","i'm","isn't","it's","i've","let's","mustn't","shan't","she'd","she'll","she's","shouldn't","that's","there's","they'd","they'll","they're","they've","wasn't","we'd","we'll","we're","weren't","we've","what's","when's","where's","who's","why's","won't","wouldn't","you'd","you'll","you're","you've","on","ge","iprc")
+  stop_words=c(stop_words,"default","multi","ge","colleagues","suddenly","somewhat","behaviour","lumins","mol","furthermore","appreciable","adverse","usual","respective","south","subsequent")
+  stop_words=tolower(stop_words)
+  return(stop_words)
+  
+}
+
+
+```
+__Normalize the Ngram__  
+
+This function will take the raw ngram list and apply the stemmer and the domain specific words to create a map of old ngram and the normalized ngram    
+
+This will finally return a map. This will be used later by the otehr programs to convert the raw text in terms of the normalized ngrams   
+
+Note: the reduction happens on the word by word basis (unigram)  
+so the bigrams , trigrams are first splitted and then the individual word is  normalized
+
+```{r}
+
+getNormalizedNgram=function(ngramWords,domainWords,stemmerWordMaps,N)
+{
+  #ngramWords=finalBigramWords
+  #domainWords=domainWords
+  #stemmerWordMaps=stemmerMappingMatrix
+  #N=2
+  matResult=matrix(nrow=length(ngramWords),ncol=2)
+  
+  #check for the stemmer reduction..that is replace temperatures, temperature with temperature
+  #for all the raw ngrams..we will check each part of the ngram word into the stemmermatrix and then replace the raw ngram part with the stemmed mapping
+  for(i in 1:length(ngramWords))
+  {
+    #i=1
+    matResult[i,1]=ngramWords[i]
+    dd<-unlist(strsplit(ngramWords[i], "[[:space:]]+"))
+    #cat(dd[1],dd[2])
+    for(j in 1:nrow(stemmerMappingMatrix))
+    {
+      for(k in 1:N)
+      {
+        if(dd[k]==stemmerWordMaps[j,1])
+        {
+          #cat("mapped found",dd[k])
+          dd[k]=stemmerWordMaps[j,2]
+        
+        }  
+      }
+    }
+    
+    #replace the ngram with the domain word...vlv will become valve
+    for(j in 1:nrow(domainWords))
+    {
+      for(k in 1:N)
+      {
+        if(dd[k]==domainWords$original[j])
+        {
+          #cat("mapped found",dd[k])
+          dd[k]=domainWords$mapped[j]
+        
+        }  
+      }
+    }
+    #ngramWords[i]=paste(dd,collapse=" ")
+    matResult[i,2]=paste(dd,collapse=" ")
+ }
+  
+  #ngramWords=unique(ngramWords)
+  return(matResult)
+
+}
+
+
+```
+
+
+## Main code 
+
+
+
+__Create the corpus__
+
+```{r}
+
+# tokenize on space and output as a list:
+corpus=Corpus(VectorSource(txt))
+stop_words=getStopWordsList()
+corpus=tm_map(corpus,removeWords,c(stop_words,stopwords("english")))
+corpus <- tm_map(corpus, PlainTextDocument)
+
+#change to term document matrix as LSA requires this
+#dtm = DocumentTermMatrix(corpus,control=list(wordLengths=c(2,Inf)))
+#dtm
+
+#using the tdm format so that we can make use of LSA in future
+tdm <- TermDocumentMatrix(corpus,control=list(wordLengths=c(2,Inf)))
+tdm
+initialTerms=rownames(as.matrix(tdm))
+
+#sparse matrix (fit a number that gives approximaetly 500 words)
+sparseTdm=removeSparseTerms(tdm,0.998)
+sparseTdm
+finalTerms=rownames(as.matrix(sparseTdm))
+head(finalTerms,100)
+#find out the terms that are not stop words but they are not high freq words as well
+#indexes=which(!initialTerms %in% finalTerms)
+#delNotImpWords=initialTerms[indexes]
+
+
+```
+
+__unigrams__
+It is basically the names of all terms in the sparse matrix
+
+```{r}
+
+identifyPOSFinalDist=function(inputFile)
+{
+    wordDistMat=matrix(nrow = 1000,ncol = 7)
+    colnames(wordDistMat)=c("word","J","N","P","R","V","Final")
+    wordList=read.csv(inputFile)
+    wordList=na.omit(wordList)
+    summary(wordList$V2)
+    #get the top words
+    head(sort(table(wordList$V2),decreasing = TRUE),50)
+    
+    #get the words which have occured atleast 10 times 
+    #sortedWords=sort(table(wordList$V2)>10,decreasing = TRUE)
+    sortedWords=names(which(sort(table(wordList$V2),decreasing = TRUE)>10))
+    #to get distribution for a particular word
+    count=0
+    for(i in 1:length(sortedWords))
+    {
+      #check if the sorted word is a unigram or multiple words. we are not looking for bigrams at this point
+      #most of the words appear as a result of removing / 
+      if(length(strsplit(sortedWords[i], " ")[[1]])==1)
+       {
+     
+        dist=(table(wordList$V3,wordList$V2==sortedWords[i])[,2])
+        count=count+1
+        wordDistMat[count,1]=sortedWords[i]
+        wordDistMat[count,2]=dist[1]
+        wordDistMat[count,3]=dist[2]
+        wordDistMat[count,4]=dist[3]
+        wordDistMat[count,5]=dist[4]
+        wordDistMat[count,6]=dist[5]
+        #this will find out verb or not verb
+        if((dist[1]+dist[2])<dist[5])
+          wordDistMat[count,7]="V"
+        else
+        {
+          if(dist[1]>dist[2])
+            wordDistMat[count,7]="J"
+          else
+            wordDistMat[count,7]="N"
+        }
+      }
+    }
+    return(wordDistMat)
+}
+
+
+
+
+GetPOSWordsForType=function(POSType,distWordDF,unigrams)
+{
+   #POSType = "N"
+   #distWordDF = distDF
+#   unigrams = unigrams
+
+  POSSpecficSubset=subset(distWordDF,distWordDF$Final==POSType)
+  POSSpecficSubset
+  
+  listWords=POSSpecficSubset$word
+  
+  #check for the stop words
+  stopwords=getStopWordsList()
+  del=(listWords %in% stopwords)
+  
+  delIndexes=which(del)
+  
+  POSSpecficSubset=POSSpecficSubset[-delIndexes,]
+  POSSpecficSubset
+
+  #remove the rows that have NA ..these are the stopwords row
+  #finalWords=na.omit(finalWords)
+  
+  #finalWordsList=unique(finalWords[,2])
+  return(POSSpecficSubset)
+}
+
+
+
+
+removeNARowsFromMatrix=function(mat)
+{
+  ind <- apply(mat, 1, function(x) all(is.na(x)))
+  mat <-mat[ !ind, ]
+  return(mat)
+}
+
+
+
+```
+
+
+```{r}
+#add the POS output thing so that we can add it with the unigram
+
+finalWordDistMat=identifyPOSFinalDist("pos_final.csv")
+finalWordDistMat=removeNARowsFromMatrix(finalWordDistMat)
+distDF=as.data.frame(finalWordDistMat)
+summary(distDF)
+
+#consider only the POS words
+#Nouns
+subSetNounsToBeAdded=GetPOSWordsForType(POSType = "N", distWordDF = distDF,unigrams = unigrams)
+sort(subSetNounsToBeAdded$word)
+listNounsToBeAdded=subSetNounsToBeAdded$word
+#listNounsToBeAdded=distDF$word
+###need to add some code her to interact with the nouns..basically we need to have the word and the frequency sio that it can be used while checking for the stemming
+
+#Adjectives
+subSetAdjectivesToBeAdded=GetPOSWordsForType(POSType = "J", distWordDF = distDF,unigrams = unigrams)
+sort(subSetAdjectivesToBeAdded$word)
+listAdjectivesToBeAdded=subSetAdjectivesToBeAdded$word
+
+
+##add to the unigrams
+unigrams<-c(as.character(listAdjectivesToBeAdded),as.character(listNounsToBeAdded))
+
+
+```
+
+__find the bigrams__  
+
+Note we willl make sure that the individual element of the bigram is part of unigram
+We will consider the bigrams that have occured more than 10 times in the corpus
+
+```{r}
+
+tokens <-  tolower(unlist(doc.list))
+tokens2 <- tolower(c(tokens[-1], "."))
+bigrams <- sort(table(paste(tokens, tokens2)), decreasing=T)
+bOk=which(bigrams>10)
+bigrams<-bigrams[bOk]
+#bigrams
+
+#check if the two words are part of the unigram
+size=length(bigrams)
+#dd<- unlist(strsplit(b, "[[:space:]]+"))
+finalBigramWords <- vector()
+for (b in names(bigrams)[1:size])
+{
+    
+    dd<- unlist(strsplit(b, "[[:space:]]+"))
+    #cat(dd,"\n")
+    #if(!(dd[1] %in% stop_words | dd[2] %in% stop_words))
+   if((dd[1] %in% unigrams & dd[2] %in% unigrams))
+    {
+      if(nchar(dd[1])>0 & nchar(dd[2])>0)
+      {
+        finalBigramWords<-c(finalBigramWords,b)  
+      }
+      #cat("found",b,"\n")
+      
+    }
+}
+
+head(finalBigramWords,100)
+
+
+```
+
+__find the trigrams__  
+
+Note we willl make sure that the individual element of the trigram is part of unigram
+
+```{r}
+tokens <- tolower(unlist(doc.list))
+tokens2 <- tolower(c(tokens[-1], "."))
+tokens3 <- tolower(c(tokens2[-1], "."))
+
+trigrams <- sort(table(paste(tokens, tokens2, tokens3)),decreasing = T)
+
+tOk=which(trigrams>10)
+trigrams<-trigrams[tOk]
+#bigrams
+
+#check if the two words are part of the unigram
+size=length(trigrams)
+#dd<- unlist(strsplit(b, "[[:space:]]+"))
+finalTrigramWords <- vector()
+for (t in names(trigrams)[1:size])
+{
+    
+    dd<- unlist(strsplit(t, "[[:space:]]+"))
+    #cat(dd,"\n")
+    #if(!(dd[1] %in% stop_words |dd[2] %in% stop_words | dd[3] %in% stop_words))
+     if((dd[1] %in% unigrams & dd[2] %in% unigrams & dd[3] %in% unigrams))
+    {
+      if(nchar(dd[1])>0 & nchar(dd[2])>0 & nchar(dd[3]>0))
+      {
+        finalTrigramWords<-c(finalTrigramWords,t)
+      }
+    }
+#     else
+#     {
+#       finalTrigramWords<-c(finalTrigramWords,t)
+#     }
+}
+
+head(finalTrigramWords,100)
+
+```
+
+We need to now create a list of words that can be replaced to their stems  
+
+The following are the steps   
+
+1. Using the porter dictionary {stemDocument} convert all the unigrams to their stems  
+2. We need to see which all stems are same and hence the two unigrams can be reduced by a common word  
+e.g. 
+ change,changes,changed,changing all gets the same root as chang
+3. For the end user we need to show the original word for that we need to do a stem to unigram conversion
+here is the approach  
+   =>For all the unigrams for which the stem is the same we will find the most occuring unigram and replace the stem with that unigram
+
+
+```{r}
+
+cosineMat=matrix(nrow=2000,ncol=4)
+sparseMat=as.matrix(sparseTdm)
+originalUnigrams=rownames(sparseTdm)
+
+#add the frequency of the words in original unigram
+tempMat=matrix(nrow=1000,ncol=2)
+count=0
+for(i in 1:originalLengthUnigrams)
+{
+  count=count+1
+  tempMat[count,1]=originalUnigrams[i]
+  tempMat[count,2]=sum(sparseMat[originalUnigrams[i],])
+  
+}
+
+#add the frequency of the words in the nouns
+for(i in 1:length(listNounsToBeAdded))
+{
+  count=count+1
+  tempMat[count,1]=as.character(subSetNounsToBeAdded$word[i])
+  numOccurence=0
+  for(j in 2:6)
+  {
+    numOccurence=numOccurence+as.numeric(as.character(subSetNounsToBeAdded[i,j]))
+  }
+  tempMat[count,2]=numOccurence
+  
+}
+
+#add the frequency for the words in teh adjectives
+
+for(i in 1:length(listAdjectivesToBeAdded))
+{
+  count=count+1
+  tempMat[count,1]=as.character(subSetAdjectivesToBeAdded$word[i])
+  numOccurence=0
+  for(j in 2:6)
+  {
+    numOccurence=numOccurence+as.numeric(as.character(subSetAdjectivesToBeAdded[i,j]))
+  }
+  tempMat[count,2]=numOccurence
+  
+}
+
+tempMat=removeNARowsFromMatrix(tempMat)
+
+stemmedWords<-stemDocument(tempMat[,1])
+
+
+
+# the following logic will find out the distnace between the stemmed version of the unigrams
+#if the distance is 0 then add that unigrams combination in the cosineMat
+
+#it is just trying to capture the word, stemmed version and the frequency of occurence of the word
+
+k=1
+#length(unigrams)
+for(i in 1:nrow(tempMat))
+{
+    cosineMat[k,1]=tempMat[i,1]
+    cosineMat[k,2]=stemmedWords[i]
+    cosineMat[k,3]=tempMat[i,2]
+    cosineMat[k,4]=""
+    k=k+1
+}
+
+cosineMat=removeNARowsFromMatrix(cosineMat)
+###########################################################
+#                  Find the stemmer mapping               #          
+############################################################
+
+#Converted to data frame as it is easier to do group wise operations
+#V1: the first unigram
+#V2: the stem of  unigram
+#V3: frequency of the unigram with which it occured in the cases
+#V4: The output which captures the most frequent unigram for the same stem group
+
+
+#basically group based on similar stem (V6) and then find the most frequent unigram for that stem
+
+df=as.data.frame(cosineMat)
+df=na.omit(df)
+
+#df=subset(df,df$V3==0)
+#convert factor to number #http://stackoverflow.com/questions/7611810/converting-a-factor-to-numeric-without-losing-information-r-as-numeric-doesn
+df$V1=as.character(df$V1)
+df$V3=as.numeric(as.character(df$V3))
+#df$V7=as.numeric(as.character(df$V7))
+
+index=which(table(df$V2)>0)
+#nGroups=(df$V3[index])
+groupNames=as.character(names(index))
+size=length(groupNames)
+
+df$V2=as.character(df$V2)
+df$V4=as.character(df$V4)
+for(i in 1:size)
+{
+  #i=2
+  #mapping=getStemmMapping(groupNames[i],df)
+  ss=subset(df,df$V2==groupNames[i])
+  #the order by the size of the string
+  ord=order(ss$V1,decreasing = FALSE)
+  mapping=as.character(ss[ord[1],1])
+  #cat("stem",groupNames[i],"\t")
+  #cat("mapping",mapping,"\n")
+  df[df$V2==groupNames[i],4]=mapping
+}
+
+# the stemmermatrix will contain the mapping between the word and mapped word. e.g. closely mapped to close
+stemmerMappingMatrix=matrix(nrow=nrow(df),ncol=2)
+stemmerMappingMatrix[1:nrow(df),1]=df$V1
+stemmerMappingMatrix[1:nrow(df),2]=df$V4
+
+```
+
+__Normalize Ngrams__  
+
+Now we will normalize the unigrams, bigrams,trigrams. Basically convert to comon words, apply domain specific extensions
+
+```{r}
+#unigram Maps
+finalUnigramWordsMap=getNormalizedNgram(domainWords = domainWords,ngramWords = unigrams, stemmerWordMaps = stemmerMappingMatrix,N=1)
+head(finalUnigramWordsMap)
+
+#bigram maps
+finalBigramWordsMap=getNormalizedNgram(domainWords = domainWords,ngramWords = finalBigramWords, stemmerWordMaps = stemmerMappingMatrix,N=2)
+head(finalBigramWordsMap)
+
+#trigram maps
+finalTrigramWordsMap=getNormalizedNgram(domainWords = domainWords,ngramWords = finalTrigramWords, stemmerWordMaps = stemmerMappingMatrix,N=3)
+head(finalTrigramWordsMap)
+```
+__Result__  
+
+Joining the 3 maps together and save the result to a csv file
+
+```{r}
+resultMat=rbind(finalUnigramWordsMap,finalBigramWordsMap,finalTrigramWordsMap)
+#write.csv(resultMat, file="keywordMapping_ss_consolidated_pos.csv")
+write.csv(resultMat, file="keywordMapping_ss_only_pos.csv")
+
+
+```
+
+
