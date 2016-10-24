@@ -44,7 +44,7 @@ getStopWordsList=function()
   stop_words = c(stop_words, LETTERS,"BR","br")
   stop_words=c(stop_words,stopwords("english"))
   
- stop_words=c(stop_words,"aren't","can't","couldn't","didn't","doesn't","don't","hadn't","hasn't","haven't","he'd","he'll","here's","he's","how's","i'd","i'll","i'm","isn't","it's","i've","let's","mustn't","shan't","she'd","she'll","she's","shouldn't","that's","there's","they'd","they'll","they're","they've","wasn't","we'd","we'll","we're","weren't","we've","what's","when's","where's","who's","why's","won't","wouldn't","you'd","you'll","you're","you've","data","advised","close","additional","resolution","generating","issue","unit","information","ai","predix","update","â","Â","m s","mm s","us cm","lbm hr","iprc","kg hr","xmtr","hs rot","ims gen","ims rot","ti","m s")
+ stop_words=c(stop_words,"aren't","can't","couldn't","didn't","doesn't","don't","hadn't","hasn't","haven't","he'd","he'll","here's","he's","how's","i'd","i'll","i'm","isn't","it's","i've","let's","mustn't","shan't","she'd","she'll","she's","shouldn't","that's","there's","they'd","they'll","they're","they've","wasn't","we'd","we'll","we're","weren't","we've","what's","when's","where's","who's","why's","won't","wouldn't","you'd","you'll","you're","you've","data","advised","close","additional","resolution","generating","issue","unit","information","ai","predix","update","m s","mm s","us cm","lbm hr","iprc","kg hr","xmtr","hs rot","ims gen","ims rot","ti","m s")
   stop_words=tolower(stop_words)
   return(stop_words)
   
