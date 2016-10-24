@@ -1,9 +1,4 @@
----
-title: "clustering_usingLDA"
-output: html_document
----
-this program calculates the P(W2|W1) contextual informations. 
-the thing that is missing is the stemming that is required to put an end to the repeated forms  like vibration, vibrations
+This program is finding out the POS tagging for the cases
 
 
 
@@ -564,7 +559,7 @@ GetWordListOfParticularTagPOS=function(POSType,distWordDF)
 
 ```
 
-
+Find the POS tags for the given set of cases. Need to pass less number of cases at a time becase of the memroy contrainst
 TEST
 ```{r}
 #Find out the POS for the various cases in the database
