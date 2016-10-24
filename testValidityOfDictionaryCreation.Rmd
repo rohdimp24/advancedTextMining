@@ -1,0 +1,57 @@
+
+This script is to check how the various dictionary creation methods are performing
+1. Only dictionary
+2.POS only
+3. POS+Dictionary
+
+Note: I am using the raw word and not the normalized word since in some list due to calculation "prediction" is present while it is "predicted" in other list
+
+```{r}
+#Only dictionary
+readDict=read.csv("keywordMapping_ss_only_dictApproach.csv",header = FALSE)
+dictWords=as.character(readDict$V2)
+
+#POS only
+readPOS=read.csv("keywordMapping_ss_only_pos.csv",header=FALSE)
+posWords=as.character(readPOS$V2)
+
+#POS+Dictionary
+readConsolidated=read.csv("keywordMapping_ss_consolidated_pos.csv",header=FALSE)
+consolidatedWords=as.character(readConsolidated$V2)
+
+```
+
+```{r}
+
+getNewWords=function(wordlist1,wordList2)
+{
+    newWordsIndex=which(!wordlist1 %in% wordList2)
+    return(wordlist1[newWordsIndex])
+    
+}
+
+```
+
+
+```{r}
+
+#In POS but not in dictionary
+POS_not_in_dict=getNewWords(posWords,dictWords)
+POS_not_in_dict
+
+#in Dictionary and not in POS
+Dict_not_in_POS=getNewWords(dictWords,posWords)
+Dict_not_in_POS
+
+#in POS but not in consolidated
+POS_not_in_consolidated=getNewWords(posWords,consolidatedWords)
+POS_not_in_consolidated
+
+#in Dict but not in consolidated
+Dict_not_in_consolidated=getNewWords(dictWords,consolidatedWords)
+Dict_not_in_consolidated
+
+
+```
+
+So it shows that the consolidated approach will have all the words.
