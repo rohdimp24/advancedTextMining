@@ -1,5 +1,5 @@
 # Keyword Generator script
-24/Oct/2016: This script merges the two approaches together that is using the no dictionary system and with POS
+24/Oct/2016: This script merges the two approaches together that is using the new dictionary system and with POS
 
 
 ```{r}
@@ -17,8 +17,8 @@ mydb = dbConnect(MySQL(), user='root', password='', dbname='domainanalysis', hos
 
 #this is the subset 
 #subcases<-dbGetQuery(mydb, "SELECT * FROM `crmcleanupnew`")
-#subcases<-dbGetQuery(mydb, "SELECT * FROM `originalss` limit 1000")
-subcases<-dbGetQuery(mydb, "SELECT id,description FROM `smartsignal_jim_allfields` ")
+subcases<-dbGetQuery(mydb, "SELECT * FROM `originalss`")
+#subcases<-dbGetQuery(mydb, "SELECT id,description FROM `smartsignal_jim_allfields` ")
 #subcases<-dbGetQuery(mydb, "SELECT * FROM `predixstackoverflow`")
 stopwordsList<-dbGetQuery(mydb, "SELECT stopword FROM `stopwordss`")
 domainWords<-dbGetQuery(mydb, "SELECT * FROM `domainwordss`")
@@ -32,7 +32,7 @@ __read the text for which the keywords need to be generated__
 #txt=tolower(subcases$originalDescription)
 #txt=tolower(subcases$caseTitle)
 txt=tolower(subcases$case)
-txt=tolower(subcases$description)
+#txt=tolower(subcases$description)
 
 txt <- gsub("[[:punct:]]", " ", txt)  # replace punctuation with space
 txt <- gsub("[[:cntrl:]]", " ", txt)  # replace control characters with space
