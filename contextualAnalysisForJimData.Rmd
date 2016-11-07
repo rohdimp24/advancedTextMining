@@ -1,0 +1,783 @@
+This file will perform the context analysis for the words in the case sentences for the Jim data
+two things
+1- Find out the sentences from the cases
+2- For each sentence find out the contextual analysis (we will use the unigrams already calculated earlier pos_dist)..that is which noun will come with which verb generally. 
+Same concept can be then later extended to find out for a particular noun what are the various recommendations given
+
+
+
+```{r}
+library(RMySQL)
+library(tm)
+library(SnowballC)
+library(Matrix)
+library(lda)
+library(LDAvis)
+library(servr)
+
+mydb = dbConnect(MySQL(), user='root', password='', dbname='domainanalysis', host='localhost')
+subcases<-dbGetQuery(mydb, "SELECT * FROM `autonormalizedjim` LIMIT 1000")
+stopwordsList<-dbGetQuery(mydb, "SELECT stopword FROM `stopwordss`")
+domainWords<-dbGetQuery(mydb, "SELECT * FROM `domainwordss`")
+
+```
+perform the basic cleanup on the data 
+
+```{r}
+#using the normalized text so that we have least amount of noise
+txt=subcases$original
+txt=tolower(txt)
+
+#remove the punctuation so that we have all unigrams
+txt <- gsub("'", "", txt)  # remove apostrophes
+txt <- gsub("[[:punct:]]", " ", txt)  # replace punctuation with space
+txt <- gsub("[[:cntrl:]]", " ", txt)  # replace control characters with space
+txt <- gsub("^[[:space:]]+", "", txt) # remove whitespace at beginning of documents
+txt <- gsub("[[:space:]]+$", "", txt) # remove whitespace at end of documents
+txt <- gsub("[[:digit:]]+", "", txt)
+
+
+###take the case and then break it into sentences
+#finalTxtMat=getSentencesFromText(txt,domainWords)
+
+
+#now we will take the data for the same case and find out the 
+
+
+
+
+
+
+#A matrix to keep track of the docid, sentenceid and the sentence content
+# finalTxtMat=matrix(nrow = NROW(txt),ncol = 3)
+# finalTxtMat[,1]=subcases$originalDocId
+# finalTxtMat[,2]=subcases$sno
+# finalTxtMat[,3]=txt
+
+```
+now prepare the corpus
+
+```{r}
+
+txtCorpus=txt
+doc.list <- strsplit(txtCorpus, "[[:space:]]+")
+
+corpus=Corpus(VectorSource(txtCorpus))
+stop_words=getStopWordsList()
+corpus=tm_map(corpus,removeWords,c(stop_words))
+# 
+corpus <- tm_map(corpus, PlainTextDocument)
+#creating the document term matrix
+dtm = DocumentTermMatrix(corpus,control=list(wordLengths=c(2,Inf)))
+dtm
+dtmMat=as.matrix(dtm)
+# 
+# #creating the term document matrix which is the transpose o fthe dtm
+# #tdm <- TermDocumentMatrix(corpus)
+# #tdm
+# 
+# 
+# #removing the sparse terms from the dtm
+# sparseDtm=removeSparseTerms(dtm,0.999)
+# sparseDtm
+# 
+
+#get the list of nouns
+
+
+distDF= read.csv("posDist.csv");
+summary(distDF)
+
+listNouns=GetWordListOfParticularTagPOS(POSType = "N", distWordDF = distDF,domainWords = domainWords,noNormalize = TRUE)
+nouns=as.character(listNouns$word)
+unigrams=nouns
+
+listVerbs=GetWordListOfParticularTagPOS(POSType = "V",distWordDF = distDF,domainWords = domainWords,noNormalize = TRUE)
+verbs=as.character(listVerbs$word)
+verbs
+
+listAdjectives=GetWordListOfParticularTagPOS(POSType = "J",distWordDF = distDF,domainWords = domainWords,noNormalize = TRUE)
+adjectives=as.character(listAdjectives$word)
+adjectives
+
+
+doc.list <- strsplit(txtCorpus, "[[:space:]]+")
+tokens <-  tolower(unlist(doc.list))
+tokens2 <- tolower(c(tokens[-1], "."))
+tokens3 <- tolower(c(tokens2[-1], "."))
+
+
+#both the words are nouns so more of a trigrams input where the third word could be a verb
+bigramsNoun_Noun=getBigrams(tokens = tokens, tokens2 = tokens2, testList1 = nouns, testList2 = nouns)
+length(bigramsNoun_Noun)
+head(bigramsNoun_Noun,100)
+
+#first one is adjective and next is noun...this is again a list of assets
+bigramsAdj_Noun=getBigrams(tokens = tokens, tokens2 = tokens2, testList1 = adjectives, testList2 = nouns)
+length(bigramsAdj_Noun)
+head(bigramsAdj_Noun,100)
+
+
+#fist one is adjective and second is verb in which case the adjective is like a noun
+bigramsAdj_Verb=getBigrams(tokens = tokens, tokens2 = tokens2, testList1 = adjectives, testList2 = verbs)
+length(bigramsAdj_Verb)
+head(bigramsAdj_Verb,100)
+
+
+#first one is noun and other is adjective that is they were wrongly identified
+bigramsNoun_Adj=getBigrams(tokens = tokens, tokens2 = tokens2, testList1 = nouns, testList2 = adjectives)
+length(bigramsNoun_Adj)
+head(bigramsNoun_Adj,100)
+
+
+#first one is noun while the second is verb ..not sure if we will get many..we may have to beven go for the chi-square co-occurenece
+bigramsNoun_Verb=getBigrams(tokens = tokens, tokens2 = tokens2, testList1 = nouns, testList2 = verbs)
+length(bigramsNoun_Verb)
+head(bigramsNoun_Verb,100)
+
+
+
+
+
+
+##trigrams
+
+trigramsNoun_Noun_Noun=getTrigrams(tokens,tokens2,tokens3,nouns,nouns,nouns)
+length(trigramsNoun_Noun_Noun)
+head(trigramsNoun_Noun_Noun,100)
+
+
+trigramsNoun_Noun_Verb=getTrigrams(tokens,tokens2,tokens3,nouns,nouns,verbs)
+length(trigramsNoun_Noun_Verb)
+head(trigramsNoun_Noun_Verb,100)
+
+trigramsAdjective_Noun_Verb=getTrigrams(tokens,tokens2,tokens3,adjectives,nouns,verbs)
+length(trigramsAdjective_Noun_Verb)
+head(trigramsAdjective_Noun_Verb,100)
+
+
+trigramsNoun_Adjective_Verb=getTrigrams(tokens,tokens2,tokens3,nouns,adjectives,verbs)
+length(trigramsNoun_Adjective_Verb)
+head(trigramsNoun_Adjective_Verb,100)
+
+
+
+#these are the potential assets
+totalPotentialAssets=c(bigramsNoun_Noun,bigramsNoun_Adj,bigramsAdj_Noun,trigramsNoun_Noun_Noun)
+length(totalPotentialAssets)
+head(totalPotentialAssets,10)
+
+
+
+#get the count of all the verbs
+verbCountsMat=getVerbCounts(verbList = verbs,mat = dtmMat)
+verbCountsMat=na.omit(verbCountsMat)
+
+outputMatrix=matrix(nrow=1000,ncol=4)
+
+del=c("stage suction","drum level","stage discharge","level control","temperature stage","vibration seismic","brgx vibes","brgy vibes","heat valve","reservoir level","level differential","ip drum level","hp drum level")
+delIndexes=which(totalPotentialAssets %in% del)
+
+
+totalPotentialAssets=totalPotentialAssets[-c(delIndexes)]
+#nounPhrase="nde generator"
+for(i in 1:NROW(totalPotentialAssets))
+{
+  print(i)
+  nounPhrase=totalPotentialAssets[i]
+  
+  outputMatrix[i,1]=nounPhrase
+  print(nounPhrase)
+  res=findMostCommonVerbsForNoun(nounPhrase,verbCountsMat,dtmMat)
+  #list of most commonly occuring verbs
+  ss=colSums(res)  
+  tt=(head(sort(ss,decreasing = TRUE),10))
+  outputMatrix[i,2]=paste0(names(tt),collapse = ",")
+  outputMatrix[i,3]=paste0(tt,collapse = ",")
+  docNum=rownames(res)
+  dd=head(docNum)
+  outputMatrix[i,4]=paste0(dd,collapse = ",") 
+  
+}
+
+outputMatrix=removeNARowsFromMatrix(outputMatrix)
+write.csv(outputMatrix,"output_jim.csv")
+
+###
+# some of teh things that need to be done
+# these combination of brigrams wityh all nouns are like assets to us. the onew that are apearing in tri_n_n_v means that we have some conditions or actions associted with the bigrams
+
+# for the groups bigrams_n_n and tri_n_n_n we need to find the associated verb... one of the way is to get the chisquare analysis 
+# so that we find out whant word which is a verb came along with the given noun . 
+#basically for all the potential assets we will find the ch-square on verbs
+#
+#
+#
+
+
+##
+#This function will take the noun that can be unigram, bigram, trigram and then using the dtm it will find out which verbs are most likely to occur with this particular noun
+#I guess we can caulate the P(W2|W1) where W2 should be C(verb,noun) and W1 is the noun. So given the noun which is the most probable verb 
+findMostCommonVerbsForNoun=function(nounPhrase,verbCountsMat,dtmMat)
+{
+   # nounPhrase="drum level"
+    arrNouns <- strsplit(nounPhrase, "[[:space:]]+")
+    numberOfNouns=length(arrNouns[[1]])
+    #which(rowSums(dtmMat[,c("bearing","temperature")])>1)
+   
+    
+        #get all the verbs which are present in the DTM as determined earluer
+    validVerbs=verbCountsMat[,1]
+    #get the names of the columns of the main matrix
+    colNamesMatrix=colnames(dtmMat)
+    #assign the rownmaes
+    rownames(dtmMat)<-c(1:nrow(dtmMat))
+    #find the columns with the verbs 
+    verbColumnIndexes=sapply(validVerbs,function(x) which(colNamesMatrix==x))
+    nounColumnIndexes=sapply(arrNouns[[1]], function(x)which(colNamesMatrix==x))
+    finalColumnIndexes=c(nounColumnIndexes,verbColumnIndexes)
+    dtmMat[dtmMat>1]=1
+    
+    #find the columns which represent the noun 
+    #nounIndex=which(colNamesMatrix==noun)
+    testLength=(numberOfNouns-1)
+#     if(numberOfNouns>1)
+#         #nounRowIndexes=which(rowSums(dtmMat[,arrNouns[[1]]])>testLength)
+#     else
+#       #nounRowIndexes=which(dtmMat[,arrNouns[[1]]]>testLength)
+    
+    if(numberOfNouns>1){
+      nounRowIndexes=which(rowSums(dtmMat[,arrNouns[[1]]])>testLength)
+   }else {
+     nounRowIndexes=which(dtmMat[,arrNouns[[1]]]>testLength)
+   }
+        #finalIndexes=c(nounIndexes,verbColumnIndexes)
+    
+    #create a new matrix with only those columns and rows ..we want to have only the required columns
+    subMatrix=dtmMat[nounRowIndexes,finalColumnIndexes]
+    #take only those rows where the noun has occurred
+    #indexes=which(dtmMat[,arrNouns[[1]]]>0)
+    #subMatrix=subMatrix[indexes,]    
+    #we just want to count the occurence and not the actual count
+    #subMatrix[subMatrix>1]=1
+    
+    #now get the colsums to see which verb has occured how many times. this will tell if that verb comes regularly or not
+#     ss=colSums(subMatrix)  
+#     head(sort(ss,decreasing = TRUE),10)
+#     
+      return(subMatrix)
+    
+    
+}
+
+
+getVerbCounts=function(verbList,mat)
+{
+  #mat=dtmMat
+  #verbList=verbs
+  verbMat=matrix(nrow=150,ncol=2)
+  cols=colnames(mat)
+  len=length(verbList) 
+  for(i in 1:len)
+  {
+    verb=verbList[i]
+    verbMat[i,1]=verb
+    if(verb %in% cols)
+      verbMat[i,2]=getFrequencyForTerm(term = verb,mat = mat)
+    else
+      verbMat[i,2]=NA
+    print(i)
+    print(verbList[i])
+    
+  }
+  
+  return(removeNARowsFromMatrix(verbMat))
+  
+}
+
+```
+
+
+```{r}
+
+getBigrams=function(tokens,tokens2,testList1,testList2)
+{
+
+  bigrams <- sort(table(paste(tokens, tokens2)), decreasing=T)
+  bOk=which(bigrams>4)
+  bigrams<-bigrams[bOk]
+  
+  size=length(bigrams)
+  #dd<- unlist(strsplit(b, "[[:space:]]+"))
+  finalBigramWords <- vector()
+  for (b in names(bigrams)[1:size])
+  {
+      #b="difference pressure"
+      dd<- unlist(strsplit(b, "[[:space:]]+"))
+      #cat(dd,"\n")
+      #if(!(dd[1] %in% stop_words | dd[2] %in% stop_words))
+     if((dd[1] %in% testList1 & dd[2] %in% testList2))
+      {
+       # print("dsdsd")
+        if(nchar(dd[1])>0 & nchar(dd[2])>0)
+        {
+          finalBigramWords<-c(finalBigramWords,b)  
+        }
+        #cat("found",b,"\n")
+        
+      }
+  }
+  
+  return(finalBigramWords)
+
+}
+
+
+getTrigrams=function(tokens,tokens2,tokens3,testList1,testList2,testList3)
+{
+  
+  trigrams <- sort(table(paste(tokens, tokens2, tokens3)),decreasing = T)
+  tOk=which(trigrams>10)
+  trigrams<-trigrams[tOk]
+  #bigrams
+  
+  #check if the two words are part of the unigram
+  size=length(trigrams)
+  #dd<- unlist(strsplit(b, "[[:space:]]+"))
+  finalTrigramWords <- vector()
+  for (t in names(trigrams)[1:size])
+  {
+      
+      dd<- unlist(strsplit(t, "[[:space:]]+"))
+      #cat(dd,"\n")
+      #if(!(dd[1] %in% stop_words |dd[2] %in% stop_words | dd[3] %in% stop_words))
+       if((dd[1] %in% testList1 & dd[2] %in% testList2 & dd[3] %in% testList3))
+      {
+        if(nchar(dd[1])>0 & nchar(dd[2])>0 & nchar(dd[3]>0))
+        {
+          finalTrigramWords<-c(finalTrigramWords,t)
+        }
+      }
+  #     else
+  #     {
+  #       finalTrigramWords<-c(finalTrigramWords,t)
+  #     }
+  }
+  return(finalTrigramWords)
+}
+
+
+
+
+
+
+
+
+```
+
+
+```{r}
+
+getStopWordsList=function()
+{
+  
+  #stop_words=tolower(stop_words)
+  
+  stop_words=stopwordsList$stopword
+  stop_words = c(stop_words, LETTERS,"BR","br")
+  stop_words=c(stop_words,stopwords("english"))
+  
+ stop_words=c(stop_words,"aren't","can't","couldn't","didn't","doesn't","don't","hadn't","hasn't","haven't","he'd","he'll","here's","he's","how's","i'd","i'll","i'm","isn't","it's","i've","let's","mustn't","shan't","she'd","she'll","she's","shouldn't","that's","there's","they'd","they'll","they're","they've","wasn't","we'd","we'll","we're","weren't","we've","what's","when's","where's","who's","why's","won't","wouldn't","you'd","you'll","you're","you've","data","advised","close","additional","resolution","generating","issue","unit","information","ai","predix","update","â","Â")
+  stop_words=tolower(stop_words)
+  return(stop_words)
+  
+}
+
+
+getFrequencyForTerm=function(term,mat)
+{
+  return(sum(mat[,term]))
+  
+}
+
+
+removeNARowsFromMatrix=function(mat)
+{
+  ind <- apply(mat, 1, function(x) all(is.na(x)))
+  mat <-mat[ !ind, ]
+  return(mat)
+}
+
+
+
+#p(w2|w1)=C(W2,W1)/C(W1)..this is in sync with the N-Gram analysis as suggested by dan juraf
+getContextualScore=function(word1,word2,bigrams,mat)
+{
+  #word1="vibration"
+  #word2="turbine"
+  bigram=paste(word1, word2)
+  print(bigram)
+  numerator=bigrams[bigram]
+  denominator=getFrequencyForTerm(word1,mat)
+  print(denominator)
+  score=numerator/denominator
+  #print(score)
+  return(score)
+  
+}
+
+
+
+GetWordListOfParticularTagPOS=function(POSType,distWordDF,domainWords,noNormalize)
+{
+  
+  POSSpecficSubset=subset(distWordDF,distWordDF$Final==POSType)
+  if(noNormalize==TRUE)
+    return(POSSpecficSubset)
+
+  originalWords=as.character(POSSpecficSubset$word)
+  wordFreq=as.numeric(as.character(POSSpecficSubset[,POSType]))
+  
+  finalWords=normalizePOSWordList(domainWords = domainWords,ngramWords = originalWords,wordFreq=wordFreq)
+#   
+#   #remove the rows that have NA ..these are the stopwords row
+   finalWords=na.omit(finalWords)
+#   
+   finalWordsList=unique(finalWords[,2])
+   return(finalWordsList)
+  
+}
+
+normalizePOSWordList=function(ngramWords,domainWords,wordFreq)
+{
+  
+  stemmedWords<-stemDocument(ngramWords)
+
+  cosineMat=matrix(nrow=700,ncol=4)
+  k=1
+  #length(unigrams)
+  for(i in 1:length(ngramWords))
+  {
+      cosineMat[k,1]=ngramWords[i]
+      cosineMat[k,2]=stemmedWords[i]
+      cosineMat[k,3]=wordFreq[i]
+      cosineMat[k,4]=""
+      k=k+1
+  }
+  
+  
+  df=as.data.frame(cosineMat)
+  df=na.omit(df)
+  
+  #df=subset(df,df$V3==0)
+  #convert factor to number #http://stackoverflow.com/questions/7611810/converting-a-factor-to-numeric-without-losing-information-r-as-numeric-doesn
+  df$V1=as.character(df$V1)
+  df$V3=as.numeric(as.character(df$V3))
+  #df$V7=as.numeric(as.character(df$V7))
+  
+  index=which(table(df$V2)>0)
+  #nGroups=(df$V3[index])
+  groupNames=as.character(names(index))
+  size=length(groupNames)
+  
+  df$V2=as.character(df$V2)
+  df$V4=as.character(df$V4)
+  for(i in 1:size)
+  {
+    #i=2
+    #mapping=getStemmMapping(groupNames[i],df)
+    ss=subset(df,df$V2==groupNames[i])
+    #the order by the size of the string
+    ord=order(ss$V1,decreasing = FALSE)
+    mapping=as.character(ss[ord[1],1])
+    #cat("stem",groupNames[i],"\t")
+    #cat("mapping",mapping,"\n")
+    df[df$V2==groupNames[i],4]=mapping
+  }
+  
+  # the stemmermatrix will contain the mapping between the word and mapped word. e.g. closely mapped to close
+  stemmerMappingMatrix=matrix(nrow=nrow(df),ncol=2)
+  stemmerMappingMatrix[1:nrow(df),1]=df$V1
+  stemmerMappingMatrix[1:nrow(df),2]=df$V4
+  
+  
+  
+  matResult=matrix(nrow=length(ngramWords),ncol=2)
+  count=0
+  for(i in 1:length(ngramWords))
+  {
+    #i=1
+    matResult[i,1]=ngramWords[i]
+    #dd<-unlist(strsplit(ngramWords[i], "[[:space:]]+"))
+    #cat(dd[1],dd[2])
+    for(j in 1:nrow(stemmerMappingMatrix))
+    {
+      if(ngramWords[i]==stemmerMappingMatrix[j,1])
+      {
+          #cat("mapped found",dd[k])
+          ngramWords[i]=stemmerMappingMatrix[j,2]
+        
+      }  
+    }
+    
+    #replace the ngram with the domain word...vlv will become valve
+    for(j in 1:nrow(domainWords))
+    {
+      
+      if(ngramWords[i]==domainWords$original[j])
+      {
+        #cat("mapped found",dd[k])
+        ngramWords[i]=domainWords$mapped[j]
+      
+      }  
+      
+    }
+    
+    stopwordsList=getStopWordsList()
+    #remove the words that are part of the stopwords
+#     for(j in 1:nrow(stopwordsList))
+#     {
+#       
+#       if(ngramWords[i]==domainWords$original[j])
+#       {
+#         #cat("mapped found",dd[k])
+#         ngramWords[i]=domainWords$mapped[j]
+#       
+#       }  
+#       
+#     }
+    
+    if(!ngramWords[i] %in% stopwordsList)
+        matResult[i,2]=ngramWords[i]
+    else
+        matResult[i,2]<-NA
+    
+    #ngramWords[i]=paste(dd,collapse=" ")
+    
+ }
+  
+  #ngramWords=unique(ngramWords)
+  return(matResult)
+
+}
+
+
+
+
+
+
+```
+
+Copied the code to find the sentences from the createSentencesFromParagraphs.Rmd file.
+
+```{r}
+
+getSentencesFromText=function(txt,domainWords)
+{
+  require("openNLP")
+  
+  
+  finalSentences=matrix(nrow=20000,ncol=3)
+  
+  count=0;
+  for(i in 1:NROW(txt))
+  {
+    #i=1
+    s <- as.String(txt[i])
+    sent_token_annotator <- Maxent_Sent_Token_Annotator()
+    a1 <- annotate(s, sent_token_annotator)
+    
+    ##
+    len=length(s[a1])
+    if(len==1)
+    {
+      
+      #print(s[a1][j])
+      rr=removeStopWordsFromSentence(s[a1],domainWords)
+      if(stringr::str_length(rr)>5)
+      {
+        count=count+1
+        finalSentences[count,1]=i
+        finalSentences[count,2]=count
+        finalSentences[count,3]=rr
+      }
+    }else{
+      for(j in 1:len)
+      {
+        rr=removeStopWordsFromSentence(s[a1][j],domainWords)
+        if(stringr::str_length(rr)>5)
+        {
+          count=count+1
+          #print(s[a1][j])
+          finalSentences[count,1]=i
+          finalSentences[count,2]=count
+          finalSentences[count,3]=rr
+        }
+      }
+    }
+  }
+
+  return(removeNARowsFromMatrix(finalSentences))
+}
+
+
+
+removeStopWordsFromSentence=function(sentence,domainWords)
+{
+  return(sentence)
+  #sentence=txtCorpus[10]
+  #domainWords=domainWords
+  stop_words=getStopWordsList()
+  #remove the punctuation and other stuff
+  
+  sentence <- gsub("'", "", sentence)  # remove apostrophes
+  sentence <- gsub("[[:punct:]]", " ", sentence)  # replace punctuation with space
+  sentence <- gsub("[[:cntrl:]]", " ", sentence)  # replace control characters with space
+  sentence <- gsub("^[[:space:]]+", "", sentence) # remove whitespace at beginning of documents
+  sentence <- gsub("[[:space:]]+$", "", sentence) # remove whitespace at end of documents
+  sentence <- gsub("[[:digit:]]+", "", sentence)
+  #remove all teh crazy characters
+  sentence=stringr::str_replace_all(sentence, "[^a-zA-Z0-9]", " ")
+  sentence <- gsub("^[[:space:]]+", "", sentence) # remove whitespace at beginning of documents
+  sentence <- gsub("[[:space:]]+$", "", sentence) # remove whitespace at end of documents
+
+  
+  doc.list <- unlist(strsplit(sentence, "[[:space:]]+"))
+  
+  
+  #doc.list<-tolower(doc.list)
+  del <- doc.list %in% stop_words 
+  doc.list <- doc.list[!del]
+  N=length(doc.list)
+  #now appy the domain transation
+#   for(j in 1:nrow(domainWords))
+#   {
+#     for(k in 1:N)
+#     {
+#       if(doc.list[k]==domainWords$original[j])
+#       {
+#         #cat("mapped found",dd[k])
+#         doc.list[k]=domainWords$mapped[j]
+#       }  
+#     }
+#   }
+#   
+  
+  
+  if(length(doc.list)>2)
+  {
+    finalSentence=paste(doc.list,collapse=" ")
+  
+    return(finalSentence)
+  }else
+    return("")
+  
+}
+
+
+applyDomainWords=function(sentence,domainWords)
+{
+  doc.list <- unlist(strsplit(sentence, "[[:space:]]+"))
+  N=length(doc.list)
+  #now appy the domain transation
+  for(j in 1:nrow(domainWords))
+  {
+    for(k in 1:N)
+    {
+      if(doc.list[k]==domainWords$original[j])
+      {
+        #cat("mapped found",dd[k])
+        doc.list[k]=domainWords$mapped[j]
+      }  
+    }
+  }
+  return(paste(doc.list,collapse=" "))
+}
+
+
+
+
+
+
+
+
+```
+
+
+
+
+
+try out the context analysis. This ananlysis is taking into account only the bigrams
+
+```{r}
+
+unigrams=colnames(sparseDtm)
+unigrams
+
+tokens <-  tolower(unlist(doc.list))
+tokens2 <- tolower(c(tokens[-1], "."))
+bigrams <- sort(table(paste(tokens, tokens2)), decreasing=T)
+bOk=which(bigrams>4)
+bigrams<-bigrams[bOk]
+
+size=length(bigrams)
+#dd<- unlist(strsplit(b, "[[:space:]]+"))
+finalBigramWords <- vector()
+for (b in names(bigrams)[1:size])
+{
+    #b="difference pressure"
+    dd<- unlist(strsplit(b, "[[:space:]]+"))
+    #cat(dd,"\n")
+    #if(!(dd[1] %in% stop_words | dd[2] %in% stop_words))
+   if((dd[1] %in% unigrams & dd[2] %in% unigrams))
+    {
+     # print("dsdsd")
+      if(nchar(dd[1])>0 & nchar(dd[2])>0)
+      {
+        finalBigramWords<-c(finalBigramWords,b)  
+      }
+      #cat("found",b,"\n")
+      
+    }
+}
+
+head(finalBigramWords,100)
+
+
+##Once the bigrams have been generated we want to check what is the context
+
+mat=as.matrix(sparseDtm)
+outputmat=matrix(nrow = 10000,ncol = 5)
+#get the contextual info
+size=length(finalBigramWords)
+count=1
+for (i in 1:size)
+{
+  b=finalBigramWords[i]
+  tt=strsplit(b, "[[:space:]]+")
+  word1=tt[[1]][1]
+  word2=tt[[1]][2]
+  print(word1)
+  print(word2)
+  outputmat[count,1]=word1
+  outputmat[count,2]=word2
+  outputmat[count,3]=getContextualScore(word1,word2,bigrams,mat)
+  count=count+1
+}
+
+head(outputmat,30)
+
+outputmat=na.omit(outputmat)
+ord <- order(outputmat[,3],decreasing = TRUE)
+
+newOutputMat=outputmat[ord,]
+
+#save the output to a csvr file
+write.csv(newOutputMat,"contextScoreBigrams.csv")
+
+
+
+
+
+
+```
