@@ -1,6 +1,8 @@
 ---
 title: "clustering_usingLDA"
 output: html_document
+
+Given the paragraphs it will return the various sentences in that paragraph. We use the Maxtent Sentence detection from teh open NLp to  break it into sentences. The sentences are used to find the similarity at the sentence level rather than the paragraph level
 ---
 
 ```{r}
