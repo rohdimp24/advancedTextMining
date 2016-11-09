@@ -16,7 +16,7 @@ library(LDAvis)
 library(servr)
 
 mydb = dbConnect(MySQL(), user='root', password='', dbname='domainanalysis', host='localhost')
-subcases<-dbGetQuery(mydb, "SELECT * FROM `autonormalizedjim` LIMIT 1000")
+subcases<-dbGetQuery(mydb, "SELECT * FROM `smartsignal_jim_allfields` LIMIT 2000")
 stopwordsList<-dbGetQuery(mydb, "SELECT stopword FROM `stopwordss`")
 domainWords<-dbGetQuery(mydb, "SELECT * FROM `domainwordss`")
 
@@ -25,12 +25,12 @@ perform the basic cleanup on the data
 
 ```{r}
 #using the normalized text so that we have least amount of noise
-txt=subcases$original
+txt=subcases$description
 txt=tolower(txt)
-
+#txt="Priority 4 ST Lube Oil Cooler ? Temp Control"
 #remove the punctuation so that we have all unigrams
 txt <- gsub("'", "", txt)  # remove apostrophes
-#txt <- gsub("[[:punct:]]", " ", txt)  # replace punctuation with space
+#txt <- stringr::str_replace_all(txt,"'/?'","")  # replace punctuation with space
 #txt <- gsub("[[:cntrl:]]", " ", txt)  # replace control characters with space
 #txt <- gsub("^[[:space:]]+", "", txt) # remove whitespace at beginning of documents
 #txt <- gsub("[[:space:]]+$", "", txt) # remove whitespace at end of documents
@@ -41,21 +41,6 @@ txt <- gsub("'", "", txt)  # remove apostrophes
 finalTxtMat=getSentencesFromText(txt,domainWords)
 finalTxtMat[,3] <- gsub("[[:punct:]]", " ", finalTxtMat[,3])
 
-#now we will take the data for the same case and find out the 
-
-#generate the row nums
-
-
-
-
-
-
-
-#A matrix to keep track of the docid, sentenceid and the sentence content
-# finalTxtMat=matrix(nrow = NROW(txt),ncol = 3)
-# finalTxtMat[,1]=subcases$originalDocId
-# finalTxtMat[,2]=subcases$sno
-# finalTxtMat[,3]=txt
 
 ```
 now prepare the corpus
@@ -140,7 +125,9 @@ length(bigramsNoun_Verb)
 head(bigramsNoun_Verb,100)
 
 
-
+bigramsVerb_Verb=getBigrams(tokens = tokens, tokens2 = tokens2, testList1 = verbs, testList2 = verbs)
+length(bigramsVerb_Verb)
+head(bigramsVerb_Verb,100)
 
 
 
@@ -184,7 +171,7 @@ verbCountsMat=na.omit(verbCountsMat)
 
 
 
-del=c("brgx vibes","brgy vibes","heat valve","top level")
+del=c("brgx vibes","brgy vibes","heat valve","top level","differential difference")
 
 #,"detector","stage","level","difference","flame","coolant","nox","volts","maximum","seismic","accurately","alias","rear","engine")
 delIndexes=which(totalPotentialAssets %in% del)
@@ -199,44 +186,57 @@ totalPotentialAssets=totalPotentialAssets[-c(delIndexes)]
 #NROW(totalPotentialAssets)
 
 ##get the associated verb & second nound for a given asset
-outputMatrix=matrix(nrow=1000,ncol=6)
+outputMatrix=matrix(nrow=1000,ncol=7)
 for(i in 1:NROW(totalPotentialAssets))
 {
   print(i)
   #i=1
   #input asset
-  nounPhrase=totalPotentialAssets[i]
+  nounPhrase=totalPotentialAssets[86]
   
   print(nounPhrase)
   #get the list of the commonly occuring verb
   res=findMostCommonVerbsForNoun(nounPhrase,verbCountsMat,dtmMat,finalTxtMat)
   
-  #list of most commonly occuring verbs
-  verbFrequencies=colSums(res)
-  #most frequenct
-  mostFrequentVerbs=(head(sort(verbFrequencies,decreasing = TRUE),10))
+  if(!is.null(dim(res)))
+  {
+    #list of most commonly occuring verbs
+    verbFrequencies=colSums(res)
+    #most frequenct
+    mostFrequentVerbs=(head(sort(verbFrequencies,decreasing = TRUE),10))
+    
+    #store the informstion in the matrix..also make sure to print only the verbs which are greater than 0
+    outputMatrix[i,1]=nounPhrase
+    outputMatrix[i,2]=paste0(names(mostFrequentVerbs[mostFrequentVerbs>0]),collapse = ",")
+    outputMatrix[i,3]=paste0(mostFrequentVerbs[mostFrequentVerbs>0],collapse = ",")
+    #docNum=rownames(res)
+    #dd=head(docNum)
+    outputMatrix[i,4]=paste0(rownames(res),collapse = ",") 
+    #check=c(check,outputMatrix[i,2])
+    
+    #the first word in the most frequent verbs is the contecxt word. take its count. in case of
+    #ngrams also the first word count will determine the count of the ngram 
+    C_W1=mostFrequentVerbs[[1]]
+    
+    
+    #get the second noun
+   frequentlyOccuringNouns=findMostCommonNounOccuringAfterNoun(nounPhrase,totalUnigramNouns,dtmMat,totalPotentialAssets,finalTxtMat)
+   #if(frequentlyOccuringNouns)
+    outputMatrix[i,5]=paste0(names(frequentlyOccuringNouns),collapse = ",") 
+    outputMatrix[i,6]=paste0(frequentlyOccuringNouns,collapse = ",")
+    
+    #this calculate the P(w2|w1)..given the nounphrase what is the possiblity of occurence of this word
+    outputMatrix[i,7]=paste0(format(round(frequentlyOccuringNouns/C_W1,2),nsmall = 2 ),collapse = ",")
+  #   if(is.na(frequentlyOccuringNouns)){
+  #     outputMatrix[i,5]=NA
+  #     outputMatrix[i,6]=NA
+  #   }else{
+  #   outputMatrix[i,5]=paste0(names(frequentlyOccuringNouns),collapse = ",") 
+  #   outputMatrix[i,6]=paste0(frequentlyOccuringNouns,collapse = ",") 
+  #   }
+
   
-  #store the informstion in the matrix
-  outputMatrix[i,1]=nounPhrase
-  outputMatrix[i,2]=paste0(names(mostFrequentVerbs),collapse = ",")
-  outputMatrix[i,3]=paste0(mostFrequentVerbs,collapse = ",")
-  #docNum=rownames(res)
-  #dd=head(docNum)
-  outputMatrix[i,4]=paste0(rownames(res),collapse = ",") 
-  #check=c(check,outputMatrix[i,2])
-  
-  
-  #get the second noun
- frequentlyOccuringNouns=findMostCommonNounOccuringAfterNoun(nounPhrase,totalUnigramNouns,dtmMat,totalPotentialAssets,finalTxtMat)
-  outputMatrix[i,5]=paste0(names(frequentlyOccuringNouns),collapse = ",") 
-  outputMatrix[i,6]=paste0(frequentlyOccuringNouns,collapse = ",")
-#   if(is.na(frequentlyOccuringNouns)){
-#     outputMatrix[i,5]=NA
-#     outputMatrix[i,6]=NA
-#   }else{
-#   outputMatrix[i,5]=paste0(names(frequentlyOccuringNouns),collapse = ",") 
-#   outputMatrix[i,6]=paste0(frequentlyOccuringNouns,collapse = ",") 
-#   }
+  }  
 }
 
 
@@ -245,7 +245,7 @@ for(i in 1:NROW(totalPotentialAssets))
 
 
 outputMatrix=removeNARowsFromMatrix(outputMatrix)
-write.csv(outputMatrix,"output_jim7.csv")
+write.csv(outputMatrix,"output_jim10.csv")
 
 
 
@@ -278,7 +278,7 @@ write.csv(outputMatrix,"output_jim7.csv")
 
 findMostCommonVerbsForNoun=function(nounPhrase,verbCountsMat,dtmMat,finalTxtMat)
 {
-    #nounPhrase="oil pressure"
+    #nounPhrase="model performance"
     arrNouns <- strsplit(nounPhrase, "[[:space:]]+")
     numberOfNouns=length(arrNouns[[1]])
   
@@ -315,7 +315,7 @@ findMostCommonVerbsForNoun=function(nounPhrase,verbCountsMat,dtmMat,finalTxtMat)
     }
 
     finalRowIndexes=c()
-    #check if the words are coming together
+    #check if the consituents unigrmas in the ngrams words are coming together
     for(ii in nounRowIndexes)
     {
       if(stringr::str_detect(finalTxtMat[ii,3],nounPhrase)==TRUE)
@@ -343,8 +343,8 @@ findMostCommonVerbsForNoun=function(nounPhrase,verbCountsMat,dtmMat,finalTxtMat)
 #given a noun which is the other prominent noun in the sentence
 findMostCommonNounOccuringAfterNoun=function(nounPhrase,nounList,dtmMat,totalPotentialAssets,finalTxtMat)
 {
-   # nounPhrase="model predictions"
-    #nounList=totalUnigramNouns
+#     nounPhrase="suction strainer"
+#     nounList=totalUnigramNouns
     arrNouns <- strsplit(nounPhrase, "[[:space:]]+")
     numberOfNouns=length(arrNouns[[1]])
   
@@ -375,7 +375,7 @@ findMostCommonNounOccuringAfterNoun=function(nounPhrase,nounList,dtmMat,totalPot
     #set the entires in the matrix to 1 as we are just interested in the presence or absence
     dtmMat[dtmMat>1]=1
     
-    #to test  
+    #to test the number of maching noun columns this basically mean that all parts of the ngrams are matched 
     testLength=(numberOfNouns-1)
     
     #if the nounphrase is composite word
@@ -388,7 +388,7 @@ findMostCommonNounOccuringAfterNoun=function(nounPhrase,nounList,dtmMat,totalPot
 
     
     finalRowIndexes=c()
-    #check if the words are coming together
+    #we also want to check if the consituent words of noun phrase are coming together in the previously found rows
     for(ii in nounRowIndexes)
     {
       if(stringr::str_detect(finalTxtMat[ii,3],nounPhrase)==TRUE)
@@ -401,29 +401,36 @@ findMostCommonNounOccuringAfterNoun=function(nounPhrase,nounList,dtmMat,totalPot
     #we want to have only the required columns
     subMatrix=dtmMat[finalRowIndexes,unique(finalColumnIndexes)]
     
-    #now get the colsums to see which verb has occured how many times. this will tell if that       verb comes regularly or not
+    #incase there is only a single row where the nounphrase has come just return invalid
+    if(NROW(finalRowIndexes)<2)
+    {
+      return(c())
+    }
+    
+    #now get the colsums to see which noun has occured how many times. 
     #get the nouns that have come atleast 10 times
     frequentlyOccurringNouns=colSums(subMatrix) 
-    frequentlyOccurringNouns=frequentlyOccurringNouns[which(frequentlyOccurringNouns>10)]
-    if(NROW(frequentlyOccurringNouns)==0)
-    {
-      frequentlyOccurringNouns=colSums(subMatrix)
-      frequentlyOccurringNouns=frequentlyOccurringNouns[which(frequentlyOccurringNouns>1)]
-    }
-    #head(sort(ss,decreasing = TRUE),20)
+    frequentlyOccurringNouns=frequentlyOccurringNouns[which(frequentlyOccurringNouns>4)]
+    #in case you could not find any noun that occurs at least 10 times then consider all the nouns that have come atleast once
+#     if(NROW(frequentlyOccurringNouns)==0)
+#     {
+#       frequentlyOccurringNouns=colSums(subMatrix)
+#       frequentlyOccurringNouns=frequentlyOccurringNouns[which(frequentlyOccurringNouns>1)]
+#     }
+#     
+    #the document numbers are essentially the rownames of the matrix
     docNum=rownames(subMatrix)
-    #dd=head(docNum) 
     
-    #remove the noun phrase comprising unigrams 
+    #remove from the frequently occuening nouns the one's which are part of the nounphrase 
     nn<- unlist(strsplit(nounPhrase, "[[:space:]]+"))
     rr=which(!names(frequentlyOccurringNouns) %in% nn)
     frequentlyOccurringNouns=frequentlyOccurringNouns[c(rr)]
     
     
+    ##find bigrams ##
+    
     #try to find the bigrams that might form using the unigrams
     uniTokens=names(frequentlyOccurringNouns)
-    
-    #using the unigrams find the bigrams
     bigramWordsVector=c()
     for(ii in 1:NROW(uniTokens))
     {
@@ -433,19 +440,20 @@ findMostCommonNounOccuringAfterNoun=function(nounPhrase,nounList,dtmMat,totalPot
       
       }
     }
-    
-    #verify that bigrams found are part of the main list of bigrams
+  
+      #verify that bigrams found are part of the main list of bigrams
     bigramTokens=bigramWordsVector[which(bigramWordsVector %in% totalPotentialAssets)]
-    
-    #now we need to find the bigrams that occur significantly with our noun phrase
-    finalBigramTokensNames=c()
-    frequentlyOccuringBigramTokens=c()
-    #if no bigram found
+     #if no bigram found then return an empty list of nouns
     if(NROW(bigramTokens)==0)
     {
       print("no bigrams")
       return(frequentlyOccurringNouns)
     }
+    
+    
+    #now we need to find the bigrams that occur significantly with our noun phrase
+    finalBigramTokensNames=c()
+    frequentlyOccuringBigramTokens=c()
     
     for(ii in 1:NROW(bigramTokens))
     {
@@ -469,9 +477,10 @@ findMostCommonNounOccuringAfterNoun=function(nounPhrase,nounList,dtmMat,totalPot
       return(frequentlyOccurringNouns)
     }
     
-    finalFrequentlyOccuringBigramTokens=c()
     ##make sure that the bigrams are actually occurring in the cases and not distributed
     #for each bigram we need to check in all the rows
+   
+    finalFrequentlyOccuringBigramTokens=c()
     for(jj in 1:NROW(frequentlyOccuringBigramTokens))
     {
       #jj=1
@@ -501,7 +510,20 @@ findMostCommonNounOccuringAfterNoun=function(nounPhrase,nounList,dtmMat,totalPot
 }
 
 
+getSentenceText=function(sentenceId)
+{
+  return(finalTxtMat[sentenceId,3])
+}
 
+getCaseIdFromSentenceId=function(sentenceId)
+{
+  return(finalTxtMat[sentenceId,1])
+}
+
+getSentenceIdsFromCaseId=function(caseId)
+{
+  return(which(finalTxtMat[,1]==caseId))
+}
 
 ```
 
@@ -946,71 +968,6 @@ applyDomainWords=function(sentence,domainWords)
 try out the context analysis. This ananlysis is taking into account only the bigrams
 
 ```{r}
-
-unigrams=colnames(sparseDtm)
-unigrams
-
-tokens <-  tolower(unlist(doc.list))
-tokens2 <- tolower(c(tokens[-1], "."))
-bigrams <- sort(table(paste(tokens, tokens2)), decreasing=T)
-bOk=which(bigrams>4)
-bigrams<-bigrams[bOk]
-
-size=length(bigrams)
-#dd<- unlist(strsplit(b, "[[:space:]]+"))
-finalBigramWords <- vector()
-for (b in names(bigrams)[1:size])
-{
-    #b="difference pressure"
-    dd<- unlist(strsplit(b, "[[:space:]]+"))
-    #cat(dd,"\n")
-    #if(!(dd[1] %in% stop_words | dd[2] %in% stop_words))
-   if((dd[1] %in% unigrams & dd[2] %in% unigrams))
-    {
-     # print("dsdsd")
-      if(nchar(dd[1])>0 & nchar(dd[2])>0)
-      {
-        finalBigramWords<-c(finalBigramWords,b)  
-      }
-      #cat("found",b,"\n")
-      
-    }
-}
-
-head(finalBigramWords,100)
-
-
-##Once the bigrams have been generated we want to check what is the context
-
-mat=as.matrix(sparseDtm)
-outputmat=matrix(nrow = 10000,ncol = 5)
-#get the contextual info
-size=length(finalBigramWords)
-count=1
-for (i in 1:size)
-{
-  b=finalBigramWords[i]
-  tt=strsplit(b, "[[:space:]]+")
-  word1=tt[[1]][1]
-  word2=tt[[1]][2]
-  print(word1)
-  print(word2)
-  outputmat[count,1]=word1
-  outputmat[count,2]=word2
-  outputmat[count,3]=getContextualScore(word1,word2,bigrams,mat)
-  count=count+1
-}
-
-head(outputmat,30)
-
-outputmat=na.omit(outputmat)
-ord <- order(outputmat[,3],decreasing = TRUE)
-
-newOutputMat=outputmat[ord,]
-
-#save the output to a csvr file
-write.csv(newOutputMat,"contextScoreBigrams.csv")
-
 
 
 ```
