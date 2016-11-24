@@ -159,7 +159,7 @@ head(finalBigramWords,100)
 ##Once the bigrams have been generated we want to check what is the context
 
 mat=as.matrix(sparseDtm)
-outputmat=matrix(nrow = 10000,ncol = 3)
+outputmat=matrix(nrow = 10000,ncol = 5)
 #get the contextual info
 size=length(finalBigramWords)
 count=1

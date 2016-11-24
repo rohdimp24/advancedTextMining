@@ -18,28 +18,34 @@ library(wordcloud)
 
 subcases=NULL
 mydb = dbConnect(MySQL(), user='root', password='', dbname='domainanalysis', host='localhost')
-subcases<-dbGetQuery(mydb, "SELECT * FROM `assetpartconditiondistribution` where equipmentType='STEAM_TURBINE' LIMIT 2000")
-stopwordsList<-dbGetQuery(mydb, "SELECT stopword FROM `stopwordss`")
-domainWords<-dbGetQuery(mydb, "SELECT * FROM `domainwordss`")
+subcases<-dbGetQuery(mydb, "SELECT DISTINCT(Noun1_Count),Noun1 FROM `assetpartconditiondistribution` where equipmentType='GEN'")
+#stopwordsList<-dbGetQuery(mydb, "SELECT stopword FROM `stopwordss`")
+#domainWords<-dbGetQuery(mydb, "SELECT * FROM `domainwordss`")
 
-# df=subset(subcases,subcases$Noun1_Count>median(subcases$Noun1_Count))
+#df[order(subcases$Noun1_Count)]
 
-df=subcases
-freqTable=sort(table(df$Noun1),decreasing = TRUE)
+boxplot(subcases$Noun1_Count)
+#take the words whose frency are above 1st quantile
+df=subset(subcases,subcases$Noun1_Count>quantile(subcases$Noun1_Count,0.25))
+
+#freqTable=sort(table(df$Noun1),decreasing = TRUE)
+finalWordsForCloud=df$Noun1
+finalWordsForCloud <- gsub(" ", "_", finalWordsForCloud)  # remove apostrophes
+
+finalFreq=df$Noun1_Count
+finalFreq
 
 
-finalWordsForCloud=names(freqTable)
-finalFreq=freqTable
-
-#layout(matrix(c(1, 2), nrow=3), heights=c(1, 4))
-
-
-#par(mfrow=c(2,1))
+#create the datastructure of barplot
+bb=finalFreq
+names(bb)=finalWordsForCloud
 
 plot.new()
 
+
+
 #text(x=1,y=1,"STEAM_TURBINE")
-barplot(freqTable)
+barplot(sort(bb,decreasing = TRUE))
 
 
 
@@ -48,10 +54,9 @@ wordcloud(finalWordsForCloud, finalFreq,
             random.order = FALSE,
             colors=brewer.pal(8, "Dark2"),
             random.color=TRUE,
-            max.words = 5000,
+            max.words = 50,
             rot.per=.25,
             scale=c(4,.5)
-            
             )
   
 par(mfrow=c(1,1))
